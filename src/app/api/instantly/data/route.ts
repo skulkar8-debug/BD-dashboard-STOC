@@ -95,7 +95,18 @@ export async function GET() {
 
   const orgs = getEnabledOrgs();
   if (orgs.length === 0) {
-    return NextResponse.json({ error: 'No org API keys configured. Check .env.local.' }, { status: 400 });
+    return NextResponse.json({
+      error: 'No Instantly API keys found. Add INSTANTLY_*_API_KEY environment variables in Vercel (Settings → Environment Variables) and redeploy.',
+      missing_vars: [
+        'INSTANTLY_MY_ORG_API_KEY',
+        'INSTANTLY_EMBARK_API_KEY',
+        'INSTANTLY_SUN_AUTO_API_KEY',
+        'INSTANTLY_AEG_VISION_API_KEY',
+        'INSTANTLY_MCLERRAN_API_KEY',
+        'INSTANTLY_BRANTA_API_KEY',
+        'INSTANTLY_CORVIA_API_KEY',
+      ],
+    }, { status: 400 });
   }
 
   const settled = await Promise.allSettled(orgs.map(fetchOrgData));

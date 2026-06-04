@@ -74,7 +74,14 @@ export function useBDData() {
     setError(null);
     try {
       const res = await fetch('/api/instantly/data');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try {
+          const body = await res.json();
+          if (body?.error) msg = body.error;
+        } catch { /* ignore */ }
+        throw new Error(msg);
+      }
       const json: BDData = await res.json();
       setData(json);
     } catch (e) {
