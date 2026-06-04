@@ -180,7 +180,6 @@ function OverviewTab({
     .sort((a, b) => b.positive_reply_count - a.positive_reply_count).slice(0, 5);
   const toReview = campaigns.filter((c) => c.recommended_action === 'Pause / Review' || c.recommended_action === 'Review')
     .sort((a, b) => b.sent - a.sent).slice(0, 5);
-  const toContinue = campaigns.filter((c) => c.recommended_action === 'Continue').slice(0, 5);
 
   // Sector performance table
   const sectorRows = [...bySector.entries()]
@@ -286,49 +285,7 @@ function OverviewTab({
         </div>
       </div>
 
-      {/* Row 3: This Week's Agenda */}
-      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center gap-2">
-          <Calendar className="h-4 w-4 text-gray-400" />
-          <span className="text-sm font-semibold text-gray-700">This Week's Agenda</span>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-gray-100">
-          {/* Continue */}
-          <div className="p-4">
-            <div className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wide mb-2">Continue</div>
-            {toContinue.length > 0 ? toContinue.map((c) => (
-              <div key={c.campaign_id} className="text-xs text-gray-700 py-1 border-b border-gray-50 last:border-0">
-                <span className="font-medium">{c.campaign_name}</span>
-                <span className="text-gray-400 ml-1">· {c.sector} · {c.state}</span>
-              </div>
-            )) : <div className="text-xs text-gray-400">No campaigns at this threshold</div>}
-          </div>
-          {/* Follow up */}
-          <div className="p-4">
-            <div className="text-[10px] font-semibold text-blue-600 uppercase tracking-wide mb-2">Follow Up</div>
-            {followUps.length > 0 ? followUps.map((c) => (
-              <div key={c.campaign_id} className="text-xs text-gray-700 py-1 border-b border-gray-50 last:border-0">
-                <span className="text-emerald-600 font-semibold">{c.positive_reply_count} positive</span>
-                <span className="font-medium ml-1">{c.campaign_name}</span>
-                <span className="text-gray-400 ml-1">· {c.state}</span>
-              </div>
-            )) : <div className="text-xs text-gray-400">No follow-ups</div>}
-          </div>
-          {/* Review */}
-          <div className="p-4">
-            <div className="text-[10px] font-semibold text-red-500 uppercase tracking-wide mb-2">Review / Pause</div>
-            {toReview.length > 0 ? toReview.map((c) => (
-              <div key={c.campaign_id} className="text-xs text-gray-700 py-1 border-b border-gray-50 last:border-0">
-                <StatusBadge value={c.recommended_action} />
-                <span className="font-medium ml-1">{c.campaign_name}</span>
-                <span className="text-gray-400 ml-1">· {c.sector}</span>
-              </div>
-            )) : <div className="text-xs text-gray-400">Nothing to review</div>}
-          </div>
-        </div>
-      </div>
-
-      {/* Row 4: Performance tables + recent positive replies */}
+      {/* Row 3: Performance tables + recent positive replies */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Sector table */}
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
