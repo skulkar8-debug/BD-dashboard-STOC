@@ -191,11 +191,45 @@ export default function StatePerformanceMap({ campaigns, emails }: Props) {
     [campaigns, emails]
   );
 
+  // Case-insensitive lookup map — handles GeoJSON NAME casing/whitespace variants
+  const statsLookup = useMemo(() => {
+    const m = new Map<string, StateStats>();
+    stateStats.forEach((stats, name) => {
+      m.set(name, stats);                            // exact
+      m.set(name.toLowerCase().trim(), stats);       // lowercase
+      m.set(name.toUpperCase().trim(), stats);       // uppercase
+    });
+    return m;
+  }, [stateStats]);
+
+  const lookupState = useCallback(
+    (rawName: string): StateStats | undefined =>
+      statsLookup.get(rawName) ??
+      statsLookup.get(rawName.trim()) ??
+      statsLookup.get(rawName.toLowerCase().trim()),
+    [statsLookup]
+  );
+
+  // Extract state name from a GeoJSON feature — try multiple common property keys
+  function getFeatureName(feature?: Feature<Geometry, GeoJsonProperties>): string {
+    if (!feature?.properties) return "";
+    const p = feature.properties;
+    return (
+      (p["NAME"] as string) ??
+      (p["name"] as string) ??
+      (p["State"] as string) ??
+      (p["state"] as string) ??
+      (p["STATE_NAME"] as string) ??
+      ""
+    );
+  }
+
   // Key forces GeoJSON layer to re-render when filter data or colorBy changes
+  // Include stateStats.size AND total positive so any real data change triggers re-render
   const dataKey = useMemo(() => {
-    let key = 0;
-    stateStats.forEach((s) => { key += s.positive * 1000 + s.replies * 10 + s.sent; });
-    return `${colorBy}-${key}-${stateStats.size}`;
+    let pos = 0, rep = 0;
+    stateStats.forEach((s) => { pos += s.positive; rep += s.replies; });
+    return `${colorBy}-${stateStats.size}-${pos}-${rep}`;
   }, [stateStats, colorBy]);
 
   useEffect(() => {
@@ -213,38 +247,38 @@ export default function StatePerformanceMap({ campaigns, emails }: Props) {
 
   const styleFeature = useCallback(
     (feature?: Feature<Geometry, GeoJsonProperties>): PathOptions => {
-      const name = (feature?.properties?.["NAME"] ?? "") as string;
-      const s = stateStats.get(name);
+      const name = getFeatureName(feature);
+      const s = lookupState(name);
       const val = s ? getStatValue(s, colorBy) : 0;
       return { ...DEFAULT_STYLE, fillColor: getColorForMetric(val, colorBy) };
     },
-    [stateStats, colorBy]
+    [lookupState, colorBy] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const onEachFeature = useCallback(
     (feature: Feature<Geometry, GeoJsonProperties>, layer: Layer) => {
-      const name = (feature?.properties?.["NAME"] ?? "") as string;
+      const name = getFeatureName(feature);
       const path = layer as L.Path;
       path.on({
         mouseover(e: LeafletMouseEvent) {
-          setHoveredState(name || null);
-          const s = stateStats.get(name);
+          const s = lookupState(name);
+          setHoveredState(s ? s.state : name || null);
           const val = s ? getStatValue(s, colorBy) : 0;
           (e.target as L.Path).setStyle({ ...HOVER_STYLE, fillColor: getColorForMetric(val, colorBy) });
           (e.target as L.Path).bringToFront();
         },
         mouseout(e: LeafletMouseEvent) {
           setHoveredState(null);
-          const s = stateStats.get(name);
+          const s = lookupState(name);
           const val = s ? getStatValue(s, colorBy) : 0;
           (e.target as L.Path).setStyle({ ...DEFAULT_STYLE, fillColor: getColorForMetric(val, colorBy) });
         },
       });
     },
-    [stateStats, colorBy]
+    [lookupState, colorBy] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  const hovered = hoveredState ? stateStats.get(hoveredState) : null;
+  const hovered = hoveredState ? (lookupState(hoveredState) ?? null) : null;
   const cfg = METRIC_CONFIG[colorBy];
   const activeOption = COLOR_OPTIONS.find((o) => o.value === colorBy)!;
 
