@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
+import dynamic from 'next/dynamic';
 import { useBDData } from '@/hooks/useBDData';
 import { FilterBar } from '@/components/bd/FilterBar';
 import { KpiCard } from '@/components/bd/KpiCard';
@@ -13,6 +14,19 @@ import {
   Calendar, Layers, MapPin, Table2, Inbox, TrendingUp, ChevronDown, ChevronRight,
 } from 'lucide-react';
 import Image from 'next/image';
+
+// Leaflet is browser-only — must be dynamically imported with SSR disabled
+const StatePerformanceMap = dynamic(
+  () => import('@/components/bd/StatePerformanceMap'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm h-[460px] flex items-center justify-center text-sm text-gray-400">
+        Loading map…
+      </div>
+    ),
+  }
+);
 
 const TABS = [
   { id: 'overview',  label: 'Overview',             icon: <BarChart3 className="h-3.5 w-3.5" /> },
@@ -200,7 +214,7 @@ function OverviewTab({
           <div className={`text-2xl font-bold tabular-nums ${noAnalytics ? 'text-gray-300' : 'text-gray-900'}`}>
             {noAnalytics ? <span title="Analytics unavailable">—</span> : fmt(stats.sent)}
           </div>
-          <div className="text-[11px] text-gray-500 mt-0.5">Sent — All-Time for Selected Campaigns</div>
+          <div className="text-[11px] text-gray-500 mt-0.5">Sent — Only All-Time Data Available</div>
           {noAnalytics && <div className="text-[10px] text-amber-500">analytics n/a</div>}
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-4 text-center shadow-sm">
@@ -614,42 +628,64 @@ function SectorsTab({ campaigns, emails }: { campaigns: NormalizedCampaign[]; em
 function StatesTab({ campaigns, emails }: { campaigns: NormalizedCampaign[]; emails: NormalizedEmail[] }) {
   const rows = useMemo(() => {
     const m = new Map<string, { campaigns: NormalizedCampaign[]; emails: NormalizedEmail[] }>();
-    campaigns.forEach((c) => { if (!m.has(c.state)) m.set(c.state, { campaigns: [], emails: [] }); m.get(c.state)!.campaigns.push(c); });
-    emails.forEach((e) => { if (!m.has(e.state)) return; m.get(e.state)!.emails.push(e); });
+    campaigns.forEach((c) => {
+      if (!m.has(c.state)) m.set(c.state, { campaigns: [], emails: [] });
+      m.get(c.state)!.campaigns.push(c);
+    });
+    emails.forEach((e) => {
+      if (!m.has(e.state)) return;
+      m.get(e.state)!.emails.push(e);
+    });
     return [...m.entries()]
       .filter(([s]) => s && s !== 'Unmapped')
-      .sort((a, b) => b[1].emails.filter((e) => e.is_positive).length - a[1].emails.filter((e) => e.is_positive).length);
+      .sort((a, b) =>
+        b[1].emails.filter((e) => e.is_positive).length -
+        a[1].emails.filter((e) => e.is_positive).length
+      );
   }, [campaigns, emails]);
 
   return (
-    <div className="rounded-xl border border-gray-200 overflow-hidden">
-      <table className="w-full text-sm">
-        <thead><tr className="bg-gray-50 border-b border-gray-200 text-xs text-gray-400 uppercase tracking-wide">
-          {['State','Orgs','Sectors','Campaigns','Sent','Replies','Reply%','Positive','Pos%','Opps'].map((h) => (
-            <th key={h} className={`py-2 px-3 ${h==='State'?'text-left':'text-right'}`}>{h}</th>
-          ))}
-        </tr></thead>
-        <tbody>
-          {rows.map(([state, d]) => {
-            const sent = d.campaigns.reduce((s, c) => s + c.sent, 0);
-            const pos = d.emails.filter((e) => e.is_positive).length;
-            return (
-              <tr key={state} className="border-b border-gray-100 hover:bg-gray-50">
-                <td className="py-2 px-3 font-medium text-gray-800">{state}</td>
-                <td className="text-right px-3">{new Set(d.campaigns.map((c) => c.org_id)).size}</td>
-                <td className="text-right px-3">{new Set(d.campaigns.map((c) => c.sector)).size}</td>
-                <td className="text-right px-3">{d.campaigns.length}</td>
-                <td className="text-right px-3">{fmt(sent)}</td>
-                <td className="text-right px-3">{d.emails.length}</td>
-                <td className="text-right px-3">{pct(d.emails.length, sent)}</td>
-                <td className="text-right px-3 text-emerald-600 font-semibold">{pos}</td>
-                <td className="text-right px-3">{pct(pos, d.emails.length)}</td>
-                <td className="text-right px-3">{d.campaigns.reduce((s, c) => s + c.opportunities, 0)}</td>
+    <div className="space-y-5">
+      {/* ── Full-width map ── */}
+      <StatePerformanceMap campaigns={campaigns} emails={emails} />
+
+      {/* ── Full-width table directly below ── */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+        <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50 text-xs font-semibold text-gray-600">
+          State Performance Table
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-200 text-xs text-gray-400 uppercase tracking-wide">
+                {['State','Orgs','Sectors','Campaigns','Sent','Replies','Reply%','Positive','Pos%','Opps'].map((h) => (
+                  <th key={h} className={`py-2 px-3 ${h === 'State' ? 'text-left' : 'text-right'}`}>{h}</th>
+                ))}
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
+            </thead>
+            <tbody>
+              {rows.map(([state, d]) => {
+                const sent = d.campaigns.reduce((s, c) => s + c.sent, 0);
+                const pos = d.emails.filter((e) => e.is_positive).length;
+                return (
+                  <tr key={state} className="border-b border-gray-100 hover:bg-gray-50">
+                    <td className="py-2 px-3 font-medium text-gray-800">{state}</td>
+                    <td className="text-right px-3">{new Set(d.campaigns.map((c) => c.org_id)).size}</td>
+                    <td className="text-right px-3">{new Set(d.campaigns.map((c) => c.sector)).size}</td>
+                    <td className="text-right px-3">{d.campaigns.length}</td>
+                    <td className="text-right px-3">{fmt(sent)}</td>
+                    <td className="text-right px-3">{d.emails.length}</td>
+                    <td className="text-right px-3">{pct(d.emails.length, sent)}</td>
+                    <td className="text-right px-3 text-emerald-600 font-semibold">{pos}</td>
+                    <td className="text-right px-3">{pct(pos, d.emails.length)}</td>
+                    <td className="text-right px-3">{d.campaigns.reduce((s, c) => s + c.opportunities, 0)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
