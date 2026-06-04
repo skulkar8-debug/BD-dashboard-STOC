@@ -200,7 +200,7 @@ function OverviewTab({
           <div className={`text-2xl font-bold tabular-nums ${noAnalytics ? 'text-gray-300' : 'text-gray-900'}`}>
             {noAnalytics ? <span title="Analytics unavailable">—</span> : fmt(stats.sent)}
           </div>
-          <div className="text-[11px] text-gray-500 mt-0.5">Sent</div>
+          <div className="text-[11px] text-gray-500 mt-0.5">Sent — All-Time for Selected Campaigns</div>
           {noAnalytics && <div className="text-[10px] text-amber-500">analytics n/a</div>}
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-4 text-center shadow-sm">
