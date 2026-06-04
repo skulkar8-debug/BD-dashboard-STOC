@@ -174,10 +174,20 @@ function classifyFromText(rawText: string): ReplyClassification {
 }
 
 export function classifyEmail(email: InstantlyEmail): ReplyClassification {
+  // ── Step 1: Respect Instantly's manually-set lead status (i_status) ──────────
+  // This is set by a human in the Instantly UI — it is the highest-priority signal.
+  // i_status -1 = Not Interested (manually marked)
+  // i_status  1 = Interested     (manually marked)
+  // i_status  0 / null = not set
+  if (email.i_status === -1) {
+    // Manually marked "Not Interested" in Instantly — never override this
+    return 'not_interested';
+  }
+
   const bodyText = email.body?.text ?? email.content_preview ?? '';
   const textClass = classifyFromText(bodyText);
 
-  // Instantly's AI value:
+  // ── Step 2: Instantly AI value ───────────────────────────────────────────────
   //   >= 2 = clearly positive
   //    1   = mild interest / borderline
   //    0   = neutral
