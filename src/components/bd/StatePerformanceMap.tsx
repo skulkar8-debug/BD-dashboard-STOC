@@ -37,23 +37,24 @@ const COLOR_OPTIONS: { value: ColorMetric; label: string }[] = [
 ];
 
 // Each metric has its own bucket thresholds and color ramp
+// First color = no data / zero — slightly darker than background so states are visible
 const METRIC_CONFIG: Record<
   ColorMetric,
   { buckets: number[]; colors: string[]; legendLabels: string[] }
 > = {
   positive: {
     buckets: [0, 3, 9, 19],
-    colors: ["#eef2f7", "#bfdbfe", "#60a5fa", "#2563eb", "#1e3a8a"],
+    colors: ["#dde3ed", "#bfdbfe", "#60a5fa", "#2563eb", "#1e3a8a"],
     legendLabels: ["0", "1–3", "4–9", "10–19", "20+"],
   },
   replies: {
     buckets: [0, 9, 29, 59],
-    colors: ["#eef2f7", "#d1fae5", "#6ee7b7", "#059669", "#064e3b"],
+    colors: ["#dde3ed", "#d1fae5", "#6ee7b7", "#059669", "#064e3b"],
     legendLabels: ["0", "1–9", "10–29", "30–59", "60+"],
   },
   positive_rate: {
     buckets: [0, 10, 24, 39],
-    colors: ["#eef2f7", "#fef9c3", "#fde047", "#ca8a04", "#78350f"],
+    colors: ["#dde3ed", "#fef9c3", "#fde047", "#ca8a04", "#78350f"],
     legendLabels: ["0%", "1–10%", "11–24%", "25–39%", "40%+"],
   },
 };
@@ -168,16 +169,16 @@ const GEOJSON_URL =
   "https://raw.githubusercontent.com/PublicaMundi/MappingAPI/master/data/geojson/us-states.json";
 
 const DEFAULT_STYLE: PathOptions = {
-  weight: 0.5,
+  weight: 1,
   opacity: 1,
-  color: "#ffffff",
-  fillOpacity: 0.75,
+  color: "#94a3b8",   // slate-400 — visible gray border between states
+  fillOpacity: 0.82,
 };
 
 const HOVER_STYLE: PathOptions = {
-  weight: 2,
-  color: "#374151",
-  fillOpacity: 0.92,
+  weight: 2.5,
+  color: "#1e40af",   // blue-800 — clear highlight on hover
+  fillOpacity: 0.95,
 };
 
 export default function StatePerformanceMap({ campaigns, emails }: Props) {
@@ -339,7 +340,7 @@ export default function StatePerformanceMap({ campaigns, emails }: Props) {
             keyboard={false}
             touchZoom={false}
             attributionControl={false}
-            style={{ height: "100%", width: "100%", background: "#f8fafc" }}
+            style={{ height: "100%", width: "100%", background: "#ffffff" }}
           >
             <GeoJSON
               key={dataKey}
