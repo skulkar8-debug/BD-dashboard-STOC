@@ -24,29 +24,29 @@ function todayStr() {
   return format(new Date(), 'yyyy-MM-dd');
 }
 
-function presetDates(preset: DatePreset): { from: string; to: string } {
+function presetDates(preset: DatePreset): { from_date: string; to_date: string } {
   const today = new Date();
   const iso = (d: Date) => format(d, 'yyyy-MM-dd');
   switch (preset) {
     case 'this_week': {
       const start = startOfWeek(today, { weekStartsOn: 1 });
-      return { from: iso(start), to: iso(today) };
+      return { from_date: iso(start), to_date: iso(today) };
     }
     case 'last_week': {
       const lastMon = startOfWeek(subWeeks(today, 1), { weekStartsOn: 1 });
       const lastSun = endOfWeek(subWeeks(today, 1), { weekStartsOn: 1 });
-      return { from: iso(lastMon), to: iso(lastSun) };
+      return { from_date: iso(lastMon), to_date: iso(lastSun) };
     }
     case 'last_7':
-      return { from: iso(subDays(today, 7)), to: iso(today) };
+      return { from_date: iso(subDays(today, 7)), to_date: iso(today) };
     case 'last_30':
-      return { from: iso(subDays(today, 30)), to: iso(today) };
+      return { from_date: iso(subDays(today, 30)), to_date: iso(today) };
     case 'mtd':
-      return { from: iso(startOfMonth(today)), to: iso(today) };
+      return { from_date: iso(startOfMonth(today)), to_date: iso(today) };
     case 'custom':
     case 'all':
     default:
-      return { from: '', to: '' };
+      return { from_date: '', to_date: '' };
   }
 }
 
@@ -139,7 +139,7 @@ export function useBDData() {
 
   const setDatePreset = useCallback((preset: DatePreset) => {
     const dates = presetDates(preset);
-    setFilters((prev) => ({ ...prev, datePreset: preset, from_date: dates.from, to_date: dates.to }));
+    setFilters((prev) => ({ ...prev, datePreset: preset, from_date: dates.from_date, to_date: dates.to_date }));
   }, []);
 
   const resetFilters = useCallback(() => setFilters(defaultFilters()), []);
