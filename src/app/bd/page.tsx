@@ -169,9 +169,9 @@ function OverviewTab({
     return m;
   }, [emails]);
 
-  const bestSector = [...bySector.entries()]
-    .filter(([, v]) => v.replies >= 3)
-    .sort((a, b) => b[1].positive / Math.max(b[1].replies, 1) - a[1].positive / Math.max(a[1].replies, 1))[0];
+  const bestCampaign = [...campaigns]
+    .filter((c) => c.positive_reply_count > 0)
+    .sort((a, b) => b.positive_reply_count - a.positive_reply_count)[0] ?? null;
   const bestState = [...byState.entries()]
     .filter(([, v]) => v.replies >= 2)
     .sort((a, b) => b[1].positive / Math.max(b[1].replies, 1) - a[1].positive / Math.max(a[1].replies, 1))[0];
@@ -251,9 +251,9 @@ function OverviewTab({
       {/* Row 2: Insight bar */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
-          <div className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wide mb-1">Best Sector</div>
-          <div className="font-semibold text-gray-800 text-sm">{bestSector ? bestSector[0] : '—'}</div>
-          {bestSector && <div className="text-xs text-gray-500 mt-0.5">{bestSector[1].positive} positive · {pct(bestSector[1].positive, bestSector[1].replies)} rate</div>}
+          <div className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wide mb-1">Best Campaign</div>
+          <div className="font-semibold text-gray-800 text-sm truncate" title={bestCampaign?.campaign_name}>{bestCampaign ? bestCampaign.campaign_name : '—'}</div>
+          {bestCampaign && <div className="text-xs text-gray-500 mt-0.5">{bestCampaign.positive_reply_count} positive · {bestCampaign.sector} · {bestCampaign.state}</div>}
         </div>
         <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
           <div className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wide mb-1">Best State</div>
