@@ -231,7 +231,7 @@ function OverviewTab({
           <div className={`text-2xl font-bold tabular-nums ${noAnalytics ? 'text-gray-300' : 'text-amber-600'}`}>
             {noAnalytics ? '—' : fmt(stats.opps)}
           </div>
-          <div className="text-[11px] text-gray-500 mt-0.5">Opportunities</div>
+          <div className="text-[11px] text-gray-500 mt-0.5">Opportunities — Only All-Time Data Available</div>
           {!noAnalytics && <div className="text-[10px] text-gray-400">{pct(stats.opps, stats.sent)} rate</div>}
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-4 text-center shadow-sm">
