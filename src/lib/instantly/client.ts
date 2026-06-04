@@ -1,0 +1,114 @@
+import type {
+  InstantlyCampaign,
+  InstantlyAnalytics,
+  InstantlyEmail,
+} from './types';
+
+const BASE = 'https://api.instantly.ai/api/v2';
+
+async function get<T>(
+  apiKey: string,
+  path: string,
+  params: Record<string, string | string[]> = {}
+): Promise<T> {
+  const url = new URL(`${BASE}${path}`);
+  Object.entries(params).forEach(([k, v]) => {
+    if (Array.isArray(v)) v.forEach((vi) => url.searchParams.append(k, vi));
+    else url.searchParams.set(k, v);
+  });
+  const res = await fetch(url.toString(), {
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Instantly ${path} → ${res.status}: ${text.slice(0, 300)}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+// Paginate endpoints that return { items, next_starting_after }
+async function paginateItems<T>(
+  apiKey: string,
+  path: string,
+  params: Record<string, string> = {},
+  maxItems = 500
+): Promise<T[]> {
+  const items: T[] = [];
+  let startingAfter: string | undefined;
+  for (;;) {
+    const p: Record<string, string> = {
+      ...params,
+      limit: '100',
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+    };
+    const res = await get<{ items?: T[]; next_starting_after?: string }>(apiKey, path, p);
+    const batch = res.items ?? [];
+    items.push(...batch);
+    if (!res.next_starting_after || batch.length === 0 || items.length >= maxItems) break;
+    startingAfter = res.next_starting_after;
+  }
+  return items.slice(0, maxItems);
+}
+
+export async function fetchCampaigns(apiKey: string): Promise<InstantlyCampaign[]> {
+  return paginateItems<InstantlyCampaign>(apiKey, '/campaigns', {}, 500);
+}
+
+// GET /api/v2/campaigns/analytics returns a raw array (not paginated items wrapper)
+// Each item: { campaign_id, campaign_name, emails_sent_count, open_count, reply_count, ... }
+export async function fetchAllCampaignAnalytics(
+  apiKey: string
+): Promise<{ data: Record<string, InstantlyAnalytics>; error?: string }> {
+  try {
+    // Returns a raw array — fetch with large limit
+    const res = await get<unknown>(apiKey, '/campaigns/analytics', { limit: '500' });
+
+    let items: InstantlyAnalytics[] = [];
+    if (Array.isArray(res)) {
+      items = res as InstantlyAnalytics[];
+    } else if (res && typeof res === 'object') {
+      const r = res as Record<string, unknown>;
+      if (Array.isArray(r.items)) items = r.items as InstantlyAnalytics[];
+      else if (Array.isArray(r.data)) items = r.data as InstantlyAnalytics[];
+    }
+
+    const data: Record<string, InstantlyAnalytics> = {};
+    items.forEach((item) => {
+      if (item.campaign_id) data[item.campaign_id] = item;
+    });
+    return { data };
+  } catch (e) {
+    return { data: {}, error: String(e) };
+  }
+}
+
+export async function fetchReceivedEmails(
+  apiKey: string,
+  campaignId?: string,
+  limit = 500
+): Promise<InstantlyEmail[]> {
+  const params: Record<string, string> = {
+    email_type: 'received',
+    preview_only: 'false',
+  };
+  if (campaignId) params.campaign_id = campaignId;
+  return paginateItems<InstantlyEmail>(apiKey, '/emails', params, limit);
+}
+
+export async function fetchEmailById(
+  apiKey: string,
+  emailId: string
+): Promise<InstantlyEmail | null> {
+  try {
+    return await get<InstantlyEmail>(apiKey, `/emails/${emailId}`);
+  } catch {
+    return null;
+  }
+}
+
+// Named alias so any stale import of the old name still resolves
+export const fetchCampaignAnalytics = fetchAllCampaignAnalytics;
