@@ -1,8 +1,43 @@
 import type { InstantlyEmail, ReplyClassification } from './types';
 import { POSITIVE_CLASSIFICATIONS } from './types';
 
+// ─── Strip quoted/threaded content ───────────────────────────────────────────
+// Email body.text includes the full thread. We only want to classify the
+// actual reply — everything after a quote marker is the original outreach
+// and will produce false positives (e.g. "give me a call" in our own email).
+
+function stripQuotedContent(text: string): string {
+  if (!text) return '';
+
+  // Common patterns that mark the start of quoted/original content
+  const quoteMarkers = [
+    // "On Mon, Apr 14 2026, Name <email> wrote:"
+    /\nOn .{10,100}wrote:\s*\n/i,
+    // "> quoted line" (standard email quoting)
+    /\n>+ /,
+    // "-----Original Message-----" or "--- Original Message ---"
+    /\n-{3,}.*original.*message.*-{3,}/i,
+    // "From: "Name" <email>" or "From: email@domain.com"
+    /\nFrom:\s+["\w]/i,
+    // "________________________________" separator
+    /\n_{5,}/,
+    // "[Name] wrote:" on its own line
+    /\n.{2,50} wrote:\s*\n/,
+  ];
+
+  let earliest = text.length;
+  for (const marker of quoteMarkers) {
+    const match = marker.exec(text);
+    if (match && match.index > 0 && match.index < earliest) {
+      earliest = match.index;
+    }
+  }
+
+  return text.slice(0, earliest).trim();
+}
+
 // ─── Pattern sets ─────────────────────────────────────────────────────────────
-// Order of checking: OOO → Unsubscribe → NOT_INTERESTED → Meeting → Referral → More Info → Positive → Neutral
+// Order: OOO → Unsubscribe → NOT_INTERESTED → Meeting → Referral → More Info → Positive → Neutral
 
 const OOO_PATTERNS = [
   /out of office/i,
@@ -20,14 +55,18 @@ const UNSUBSCRIBE_PATTERNS = [
   /please (remove|unsubscribe|take me off)/i,
   /\bunsubscribe\b/i,
   /\bopt.?out\b/i,
-  /stop (emailing|contacting|reaching out)/i,
+  /stop (emailing|contacting|reaching out|sending)/i,
   /do not (contact|email|reach out to) (me|us) again/i,
   /remove (me|us) from your (list|database)/i,
   /no more emails/i,
   /off your (list|mailing list)/i,
+  // Short "stop" commands — "No. Stop" / "Stop." / "Please stop."
+  /^(no[.,]?\s+)?stop[.,]?\s*$/im,
+  /^stop (this|it|now|please)[.,]?\s*$/im,
+  /\bstop (this|it|now)\b/i,
 ];
 
-// IMPORTANT: Check NOT interested BEFORE interested patterns to avoid false positives
+// IMPORTANT: Check NOT interested BEFORE positive to avoid false positives
 const NOT_INTERESTED_PATTERNS = [
   /not (interested|looking|selling|ready)/i,
   /no (interest|thanks|thank you)/i,
@@ -98,7 +137,6 @@ const MORE_INFO_PATTERNS = [
 ];
 
 const POSITIVE_PATTERNS = [
-  // Clear buying / exit interest
   /\bopen to (exploring|a conversation|discussing|the idea|selling|an offer|it)\b/i,
   /\bwould (consider|be open|be interested|be willing)\b/i,
   /\b(actively |been |have been )?(looking|thinking|considering|exploring) (to |a )?(sell|exit|retire|transition|sale|an offer)\b/i,
@@ -118,23 +156,19 @@ function match(text: string, patterns: RegExp[]): boolean {
   return patterns.some((p) => p.test(text));
 }
 
-function classifyFromText(text: string): ReplyClassification {
-  if (!text || text.trim().length < 10) return 'neutral_needs_review';
+// Classify only the reply portion (quoted content stripped)
+function classifyFromText(rawText: string): ReplyClassification {
+  const text = stripQuotedContent(rawText);
+  if (!text || text.trim().length < 3) return 'neutral_needs_review';
 
-  // Check OOO / auto-reply first
-  if (match(text, OOO_PATTERNS)) return 'out_of_office';
-  // Unsubscribe
-  if (match(text, UNSUBSCRIBE_PATTERNS)) return 'unsubscribe';
-  // NOT interested — MUST come before positive to avoid "not interested" → positive
+  if (match(text, OOO_PATTERNS))          return 'out_of_office';
+  if (match(text, UNSUBSCRIBE_PATTERNS))  return 'unsubscribe';
+  // NOT interested BEFORE positive — avoids "not interested" matching positive patterns
   if (match(text, NOT_INTERESTED_PATTERNS)) return 'not_interested';
-  // Meeting — clear positive signal
-  if (match(text, MEETING_PATTERNS)) return 'meeting_requested';
-  // Referral / correct contact
-  if (match(text, REFERRAL_PATTERNS)) return 'referral_given';
-  // More info requested
-  if (match(text, MORE_INFO_PATTERNS)) return 'more_info_requested';
-  // Positive / interested — checked last to avoid false positives
-  if (match(text, POSITIVE_PATTERNS)) return 'positive_interested';
+  if (match(text, MEETING_PATTERNS))      return 'meeting_requested';
+  if (match(text, REFERRAL_PATTERNS))     return 'referral_given';
+  if (match(text, MORE_INFO_PATTERNS))    return 'more_info_requested';
+  if (match(text, POSITIVE_PATTERNS))     return 'positive_interested';
 
   return 'neutral_needs_review';
 }
@@ -149,41 +183,40 @@ export function classifyEmail(email: InstantlyEmail): ReplyClassification {
   //    0   = neutral
   //   -1   = negative
   if (email.ai_interest_value != null) {
+
     if (email.ai_interest_value >= 2) {
-      // AI says positive — but check if text says OOO / unsub / not-interested
-      if (textClass === 'out_of_office') return 'out_of_office';
-      if (textClass === 'unsubscribe') return 'unsubscribe';
-      if (textClass === 'not_interested') return 'not_interested';
-      // Accept AI positive
+      // AI says positive — but text overrides for clear negatives
+      if (textClass === 'out_of_office')    return 'out_of_office';
+      if (textClass === 'unsubscribe')      return 'unsubscribe';
+      if (textClass === 'not_interested')   return 'not_interested';
       if (textClass === 'meeting_requested') return 'meeting_requested';
-      if (textClass === 'referral_given') return 'referral_given';
+      if (textClass === 'referral_given')   return 'referral_given';
       if (textClass === 'more_info_requested') return 'more_info_requested';
       return 'positive_interested';
     }
 
     if (email.ai_interest_value === 1) {
-      // Mild AI interest — use text to disambiguate, but don't force positive
-      if (textClass === 'out_of_office') return 'out_of_office';
-      if (textClass === 'unsubscribe') return 'unsubscribe';
-      if (textClass === 'not_interested') return 'not_interested';
+      // Mild AI interest — only upgrade if text confirms a clear positive signal
+      if (textClass === 'out_of_office')    return 'out_of_office';
+      if (textClass === 'unsubscribe')      return 'unsubscribe';
+      if (textClass === 'not_interested')   return 'not_interested';
       if (textClass === 'meeting_requested') return 'meeting_requested';
-      if (textClass === 'referral_given') return 'referral_given';
+      if (textClass === 'referral_given')   return 'referral_given';
       if (textClass === 'more_info_requested') return 'more_info_requested';
-      // Only call positive if text also confirms it
       if (textClass === 'positive_interested') return 'positive_interested';
-      return 'neutral_needs_review'; // ai=1 but no clear text signal
+      return 'neutral_needs_review';
     }
 
     if (email.ai_interest_value === -1) {
-      // AI says negative — still check for referral/meeting/OOO that AI may have missed
-      if (textClass === 'referral_given') return 'referral_given';
-      if (textClass === 'meeting_requested') return 'meeting_requested';
-      if (textClass === 'out_of_office') return 'out_of_office';
-      if (textClass === 'unsubscribe') return 'unsubscribe';
+      // Instantly says NEGATIVE — only override for genuine referrals or OOO.
+      // NEVER override to meeting_requested: if AI says -1, it's not a meeting.
+      if (textClass === 'referral_given')  return 'referral_given';
+      if (textClass === 'out_of_office')   return 'out_of_office';
+      if (textClass === 'unsubscribe')     return 'unsubscribe';
       return 'not_interested';
     }
 
-    // ai_interest_value === 0 — use text classification
+    // ai_interest_value === 0 — fall through to text classification
   }
 
   return textClass;
