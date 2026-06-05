@@ -1,29 +1,20 @@
 'use client'
 
 import { useMemo, useState, useCallback } from 'react'
-import { ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRightIcon } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRt } from 'lucide-react'
 import type { Sector } from '@/lib/types'
 import { WORKFLOW_EVENTS } from '@/lib/workflowEvents'
 
 // ─── layout ───────────────────────────────────────────────────────────────────
-const LABEL_W       = 200
-const DAY_W         = 38
-const HEADER_H      = 48
-const DAYS_SHOWN    = 56
-
-// Collapsed: one row showing mini bars (5px tall)
-const MINI_H        = 5
-const MINI_GAP      = 2
-const MINI_PAD      = 6
-const MINI_LANES    = 5
-const ROW_COLLAPSED = MINI_PAD * 2 + MINI_LANES * MINI_H + (MINI_LANES - 1) * MINI_GAP  // ≈ 46px
-
-// Expanded: full-size bars with labels (15px tall)
-const FULL_H        = 15
-const FULL_GAP      = 3
-const FULL_PAD      = 6
-const FULL_LANES    = 5
-const ROW_EXPANDED  = FULL_PAD * 2 + FULL_LANES * FULL_H + (FULL_LANES - 1) * FULL_GAP  // ≈ 99px
+const SECTOR_W  = 130   // sector name column (sticky)
+const PHASE_W   = 86    // phase label column (sticky)
+const STEP_W    = 138   // step name column (sticky)
+const LABEL_W   = SECTOR_W + PHASE_W + STEP_W  // 354px total sticky
+const DAY_W     = 38
+const SECTOR_H  = 32    // collapsed header row height
+const STEP_H    = 26    // expanded step row height
+const HEADER_H  = 48
+const DAYS_SHOWN = 56
 
 const PHASE_BAR: Record<string, { fill: string; stroke: string; text: string }> = {
   'Research/Data': { fill: '#ddd6fe', stroke: '#7c3aed', text: '#4c1d95' },
@@ -37,43 +28,32 @@ const STATUS_DOT: Record<string, string> = {
   Planning: '#d1d5db', 'In Progress': '#60a5fa', Published: '#34d399', Completed: '#a78bfa',
 }
 
-function utcDate(s: string) { return new Date(s + 'T00:00:00Z') }
+const PHASES_ORDER = ['Research/Data', 'Report', 'Outreach', 'TIP', 'Calls/Intel'] as const
+const EVENTS_BY_PHASE = PHASES_ORDER.map(ph => ({
+  phase: ph, events: WORKFLOW_EVENTS.filter(e => e.phase === ph),
+}))
+
+// ─── helpers ──────────────────────────────────────────────────────────────────
+function utcDate(s: string)    { return new Date(s + 'T00:00:00Z') }
 function addDays(d: Date, n: number) { const r = new Date(d); r.setUTCDate(r.getUTCDate() + n); return r }
 function daysBetween(a: Date, b: Date) { return Math.round((b.getTime() - a.getTime()) / 86_400_000) }
 function fmtDay(d: Date) { return d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }).slice(0, 1) }
 function fmtNum(d: Date) { return d.toLocaleDateString('en-US', { day: 'numeric', timeZone: 'UTC' }) }
 
-interface Block { key: string; phase: string; label: string; start: Date; end: Date; fill: string; stroke: string; text: string; lane: number }
-
-function computeBlocks(pub: Date): Block[] {
-  const ends: Date[] = []
-  return WORKFLOW_EVENTS
-    .map(ev => {
-      const c = PHASE_BAR[ev.phase] ?? PHASE_BAR['Report']
-      return { key: ev.key, phase: ev.phase, label: ev.label, start: addDays(pub, ev.sOff), end: addDays(pub, ev.eOff), fill: c.fill, stroke: c.stroke, text: c.text }
-    })
-    .sort((a, b) => a.start.getTime() - b.start.getTime())
-    .map(b => {
-      let lane = ends.findIndex(e => b.start >= e)
-      if (lane === -1) { lane = ends.length; ends.push(addDays(b.end, 1)) }
-      else ends[lane] = addDays(b.end, 1)
-      return { ...b, lane }
-    })
-}
-
+// ─── component ────────────────────────────────────────────────────────────────
 export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
-  const today     = new Date('2026-06-05T00:00:00Z')
-  const scheduled = useMemo(() => sectors.filter(s => !!s.publishDate), [sectors])
+  const today = new Date('2026-06-05T00:00:00Z')
 
   // All collapsed by default
-  const [expanded,  setExpanded]  = useState<Set<string>>(() => new Set())
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const toggle      = useCallback((id: string) => setExpanded(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n }), [])
   const expandAll   = () => setExpanded(new Set(sectors.map(s => s.id)))
   const collapseAll = () => setExpanded(new Set())
 
-  const [viewStart, setViewStart] = useState<Date>(() =>
-    scheduled.length ? addDays(utcDate(scheduled[0].publishDate), -38) : addDays(today, -14)
-  )
+  const [viewStart, setViewStart] = useState<Date>(() => {
+    const sched = sectors.filter(s => !!s.publishDate)
+    return sched.length ? addDays(utcDate(sched[0].publishDate), -38) : addDays(today, -14)
+  })
 
   const viewEnd  = addDays(viewStart, DAYS_SHOWN - 1)
   const chartW   = DAYS_SHOWN * DAY_W
@@ -94,23 +74,32 @@ export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
     return out
   }, [days])
 
-  const blockMap = useMemo(() => {
-    const m = new Map<string, Block[]>()
-    sectors.forEach(s => {
-      m.set(s.id, s.publishDate ? computeBlocks(utcDate(s.publishDate)) : [])
-    })
-    return m
-  }, [sectors])
+  // Build flat rows for label column + SVG
+  type SectorRow = { kind: 'sector'; sector: Sector }
+  type StepRow   = { kind: 'step';   sector: Sector; phase: string; evKey: string; label: string; sOff: number; eOff: number }
+  type Row = SectorRow | StepRow
 
-  const totalH = useMemo(() =>
-    HEADER_H + sectors.reduce((h, s) => h + (expanded.has(s.id) ? ROW_EXPANDED : ROW_COLLAPSED), 0),
-    [sectors, expanded]
-  )
+  const rows = useMemo<Row[]>(() => {
+    const out: Row[] = []
+    sectors.forEach(s => {
+      out.push({ kind: 'sector', sector: s })
+      if (expanded.has(s.id)) {
+        EVENTS_BY_PHASE.forEach(({ phase, events }) => {
+          events.forEach(ev => {
+            out.push({ kind: 'step', sector: s, phase, evKey: ev.key, label: ev.label, sOff: ev.sOff, eOff: ev.eOff })
+          })
+        })
+      }
+    })
+    return out
+  }, [sectors, expanded])
+
+  const totalH = HEADER_H + rows.reduce((h, r) => h + (r.kind === 'sector' ? SECTOR_H : STEP_H), 0)
 
   return (
     <div className="w-full select-none">
 
-      {/* Controls */}
+      {/* Timeline nav + expand controls */}
       <div className="flex items-center gap-2 mb-3 flex-wrap">
         <button onClick={() => setViewStart(d => addDays(d, -7))} className="p-1 rounded hover:bg-gray-100 text-gray-500"><ChevronLeft className="size-4" /></button>
         <button onClick={() => setViewStart(d => addDays(d,  7))} className="p-1 rounded hover:bg-gray-100 text-gray-500"><ChevronRight className="size-4" /></button>
@@ -128,7 +117,7 @@ export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
         </div>
       </div>
 
-      {/* Legend */}
+      {/* Phase legend */}
       <div className="flex items-center gap-4 flex-wrap mb-4">
         {Object.entries(PHASE_BAR).map(([ph, c]) => (
           <div key={ph} className="flex items-center gap-1.5 text-xs text-gray-600">
@@ -142,49 +131,79 @@ export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
       {/* Grid */}
       <div className="rounded-xl border border-gray-200 bg-white overflow-hidden" style={{ display: 'flex' }}>
 
-        {/* Sticky sector column */}
+        {/* ── Sticky 3-column label area ────────────────────────────────────── */}
         <div style={{ width: LABEL_W, minWidth: LABEL_W, position: 'sticky', left: 0, zIndex: 20 }}
           className="shrink-0 bg-white border-r border-gray-200">
 
-          <div style={{ height: HEADER_H }} className="bg-gray-50 border-b border-gray-200 flex items-end px-3 pb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Sector</span>
+          {/* Column headers */}
+          <div style={{ height: HEADER_H }} className="bg-gray-50 border-b border-gray-200 flex items-end">
+            <div style={{ width: SECTOR_W }} className="px-2 pb-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">Sector</div>
+            <div style={{ width: PHASE_W  }} className="px-2 pb-2 text-[10px] font-bold uppercase tracking-wider text-gray-400 border-l border-gray-200">Phase</div>
+            <div style={{ width: STEP_W   }} className="px-2 pb-2 text-[10px] font-bold uppercase tracking-wider text-gray-400 border-l border-gray-200">Step</div>
           </div>
 
-          {sectors.map(s => {
-            const isExp  = expanded.has(s.id)
-            const rh     = isExp ? ROW_EXPANDED : ROW_COLLAPSED
-            const hasDate = !!s.publishDate
-            return (
-              <div
-                key={s.id}
-                style={{ height: rh }}
-                className="flex flex-col justify-center px-3 border-b border-gray-100 cursor-pointer hover:bg-indigo-50 transition-colors"
-                onClick={() => toggle(s.id)}
-              >
-                <div className="flex items-center gap-1.5">
-                  {isExp
-                    ? <ChevronDown     className="size-3 text-indigo-500 shrink-0" />
-                    : <ChevronRightIcon className="size-3 text-gray-400 shrink-0"  />
-                  }
-                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: STATUS_DOT[s.status] ?? '#d1d5db' }} />
-                  <span className="text-[12px] font-semibold text-gray-800 truncate">{s.name}</span>
+          {/* Rows */}
+          {rows.map((row, i) => {
+            if (row.kind === 'sector') {
+              const s    = row.sector
+              const isExp = expanded.has(s.id)
+              return (
+                <div key={`lbl-s-${s.id}`} style={{ height: SECTOR_H }}
+                  className="flex items-center bg-gray-50 border-b border-gray-200 cursor-pointer hover:bg-indigo-50 transition-colors"
+                  onClick={() => toggle(s.id)}>
+                  {/* Sector col */}
+                  <div style={{ width: SECTOR_W }} className="flex items-center gap-1.5 px-2 min-w-0">
+                    {isExp
+                      ? <ChevronDown className="size-3 text-indigo-500 shrink-0" />
+                      : <ChevronRt   className="size-3 text-gray-400 shrink-0" />
+                    }
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: STATUS_DOT[s.status] ?? '#d1d5db' }} />
+                    <span className="text-[11px] font-bold text-gray-800 truncate">{s.name}</span>
+                  </div>
+                  {/* Phase + Step col combined: show date or "no date" */}
+                  <div style={{ width: PHASE_W + STEP_W }} className="flex items-center px-2 border-l border-gray-200 min-w-0 gap-2">
+                    <span className={`text-[10px] truncate ${s.publishDate ? 'text-gray-500' : 'text-gray-300 italic'}`}>
+                      {s.publishDate
+                        ? utcDate(s.publishDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+                        : 'no publish date'}
+                    </span>
+                    {!isExp && s.publishDate && (
+                      <span className="ml-auto text-[9px] text-indigo-400 shrink-0 whitespace-nowrap">click to expand</span>
+                    )}
+                  </div>
                 </div>
-                <div className="text-[10px] pl-5 mt-0.5">
-                  {hasDate
-                    ? <span className="text-gray-400">{utcDate(s.publishDate).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric', timeZone:'UTC' })}</span>
-                    : <span className="text-gray-300 italic">no publish date</span>
-                  }
+              )
+            }
+
+            // Step row
+            const ph = PHASE_BAR[row.phase] ?? PHASE_BAR['Report']
+            return (
+              <div key={`lbl-t-${row.sector.id}-${row.evKey}`} style={{ height: STEP_H }}
+                className="flex items-center border-b border-gray-100">
+                {/* Sector col: blank */}
+                <div style={{ width: SECTOR_W }} className="border-r border-gray-100 h-full shrink-0" />
+                {/* Phase col */}
+                <div style={{ width: PHASE_W, borderLeftColor: ph.stroke }}
+                  className="h-full flex items-center px-2 border-l-2 border-r border-gray-100 shrink-0">
+                  <span className="text-[9px] font-bold uppercase tracking-wide truncate" style={{ color: ph.stroke }}>
+                    {row.phase}
+                  </span>
+                </div>
+                {/* Step col */}
+                <div style={{ width: STEP_W }} className="h-full flex items-center px-2 border-l border-gray-100 min-w-0">
+                  <span className="text-[11px] text-gray-700 truncate">{row.label}</span>
                 </div>
               </div>
             )
           })}
 
+          {/* Footer */}
           <div style={{ height: 32 }} className="bg-gray-50 border-t border-gray-200 flex items-center px-3">
-            <span className="text-xs font-bold text-gray-600">{sectors.length} sectors</span>
+            <span className="text-xs font-bold text-gray-600">{sectors.length} sectors · {expanded.size} expanded</span>
           </div>
         </div>
 
-        {/* Scrollable SVG */}
+        {/* ── Scrollable SVG chart ──────────────────────────────────────────── */}
         <div style={{ flex: 1, overflowX: 'auto' }}>
           <svg width={chartW} height={totalH + 32} style={{ display: 'block', minWidth: chartW }}>
 
@@ -201,8 +220,7 @@ export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
             <rect x={0} y={22} width={chartW} height={HEADER_H - 22} fill="#f9fafb" />
             {days.map((d, i) => {
               const isToday = i === todayOff
-              const isSun   = d.getUTCDay() === 0
-              const isSat   = d.getUTCDay() === 6
+              const isSun = d.getUTCDay() === 0; const isSat = d.getUTCDay() === 6
               return (
                 <g key={i}>
                   <rect x={i * DAY_W} y={22} width={DAY_W} height={HEADER_H - 22}
@@ -218,85 +236,83 @@ export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
             })}
             <line x1={0} y1={HEADER_H} x2={chartW} y2={HEADER_H} stroke="#e5e7eb" />
 
-            {/* Sector rows */}
+            {/* Data rows */}
             {(() => {
               let yOff = HEADER_H
-              return sectors.map(s => {
-                const isExp  = expanded.has(s.id)
-                const rh     = isExp ? ROW_EXPANDED : ROW_COLLAPSED
-                const blocks = blockMap.get(s.id) ?? []
-                const laneH  = isExp ? FULL_H  : MINI_H
-                const laneG  = isExp ? FULL_GAP : MINI_GAP
-                const pad    = isExp ? FULL_PAD : MINI_PAD
+              return rows.map(row => {
+                const rh = row.kind === 'sector' ? SECTOR_H : STEP_H
+
+                if (row.kind === 'sector') {
+                  const el = (
+                    <g key={`svg-s-${row.sector.id}`} style={{ cursor: 'pointer' }}
+                      onClick={() => toggle(row.sector.id)}>
+                      <rect x={0} y={yOff} width={chartW} height={rh} fill="#f9fafb" />
+                      {days.map((_, i) => (
+                        <line key={i} x1={i * DAY_W} y1={yOff} x2={i * DAY_W} y2={yOff + rh} stroke="#e5e7eb" strokeWidth={0.5} />
+                      ))}
+                      <line x1={0} y1={yOff + rh} x2={chartW} y2={yOff + rh} stroke="#e5e7eb" />
+                    </g>
+                  )
+                  yOff += rh; return el
+                }
+
+                // Step row
+                const s = row.sector
+                const pub = s.publishDate ? utcDate(s.publishDate) : null
+                const ph  = PHASE_BAR[row.phase] ?? PHASE_BAR['Report']
+
+                let bar: React.ReactNode = null
+                if (pub) {
+                  const startD = daysBetween(viewStart, addDays(pub, row.sOff))
+                  const endD   = daysBetween(viewStart, addDays(pub, row.eOff))
+                  const cs = Math.max(0, startD); const ce = Math.min(DAYS_SHOWN - 1, endD)
+                  if (cs <= ce) {
+                    const bx = cs * DAY_W + 2
+                    const bw = Math.max((ce - cs + 1) * DAY_W - 4, 6)
+                    const by = yOff + 4
+                    const bh = STEP_H - 8
+                    bar = (
+                      <g>
+                        <rect x={bx} y={by} width={bw} height={bh} rx={3}
+                          fill={ph.fill} stroke={ph.stroke} strokeWidth={1} />
+                        {startD < 0 && <polygon points={`${bx},${by} ${bx+6},${by+bh/2} ${bx},${by+bh}`} fill={ph.stroke} opacity={0.5} />}
+                        {endD >= DAYS_SHOWN && <polygon points={`${bx+bw},${by} ${bx+bw-6},${by+bh/2} ${bx+bw},${by+bh}`} fill={ph.stroke} opacity={0.5} />}
+                        {bw > 26 && (
+                          <text x={bx + (startD < 0 ? 10 : 5)} y={by + bh / 2 + 4}
+                            fontSize={8.5} fill={ph.text} fontWeight="600"
+                            style={{ pointerEvents: 'none', userSelect: 'none' }}>
+                            {bw > 100 ? row.label : bw > 48 ? row.label.split(' ')[0] : ''}
+                          </text>
+                        )}
+                        <title>{`${s.name} — ${row.label}\n${addDays(pub, row.sOff).toISOString().split('T')[0]} → ${addDays(pub, row.eOff).toISOString().split('T')[0]}`}</title>
+                      </g>
+                    )
+                  }
+                }
 
                 const el = (
-                  <g key={s.id} style={{ cursor: 'pointer' }} onClick={() => toggle(s.id)}>
-                    {/* Background + grid */}
+                  <g key={`svg-t-${s.id}-${row.evKey}`}>
                     {days.map((d, i) => {
                       const we = d.getUTCDay() === 0 || d.getUTCDay() === 6
                       return (
                         <g key={i}>
-                          {we && <rect x={i * DAY_W} y={yOff} width={DAY_W} height={rh} fill="#fafafa" />}
-                          <line x1={i * DAY_W} y1={yOff} x2={i * DAY_W} y2={yOff + rh} stroke="#f3f4f6" />
+                          {we && <rect x={i * DAY_W} y={yOff} width={DAY_W} height={STEP_H} fill="#fafafa" />}
+                          <line x1={i * DAY_W} y1={yOff} x2={i * DAY_W} y2={yOff + STEP_H} stroke="#f3f4f6" />
                         </g>
                       )
                     })}
-
-                    {/* Today column */}
-                    {todayOff >= 0 && todayOff < DAYS_SHOWN && (
-                      <rect x={todayOff * DAY_W} y={yOff} width={DAY_W} height={rh} fill="#eef2ff" opacity={0.4} />
-                    )}
-
-                    {/* Bars — visible in BOTH states, just different sizes */}
-                    {blocks.filter(b => b.lane < FULL_LANES).map((b, bi) => {
-                      const startD = daysBetween(viewStart, b.start)
-                      const endD   = daysBetween(viewStart, b.end)
-                      const cs = Math.max(0, startD)
-                      const ce = Math.min(DAYS_SHOWN - 1, endD)
-                      if (cs > ce) return null
-                      const bx = cs * DAY_W + 1
-                      const bw = Math.max((ce - cs + 1) * DAY_W - 2, isExp ? 6 : 2)
-                      const by = yOff + pad + b.lane * (laneH + laneG)
-                      return (
-                        <g key={bi}>
-                          <rect x={bx} y={by} width={bw} height={laneH} rx={isExp ? 3 : 1}
-                            fill={b.fill} stroke={b.stroke} strokeWidth={isExp ? 1 : 0.5} opacity={0.92} />
-                          {startD < 0 && (
-                            <polygon points={`${bx},${by} ${bx+4},${by+laneH/2} ${bx},${by+laneH}`} fill={b.stroke} opacity={0.5} />
-                          )}
-                          {endD >= DAYS_SHOWN && (
-                            <polygon points={`${bx+bw},${by} ${bx+bw-4},${by+laneH/2} ${bx+bw},${by+laneH}`} fill={b.stroke} opacity={0.5} />
-                          )}
-                          {/* Labels only when expanded */}
-                          {isExp && bw > 28 && (
-                            <text x={bx + (startD < 0 ? 8 : 5)} y={by + laneH / 2 + 4.5}
-                              fontSize={8.5} fill={b.text} fontWeight="600"
-                              style={{ pointerEvents: 'none', userSelect: 'none' }}>
-                              {bw > 95 ? b.label : bw > 45 ? b.label.split(' ')[0] : ''}
-                            </text>
-                          )}
-                          <title>{`${s.name} — ${b.label}\n${b.start.toISOString().split('T')[0]} → ${b.end.toISOString().split('T')[0]}`}</title>
-                        </g>
-                      )
-                    })}
-
-                    {/* No-date placeholder text */}
-                    {!s.publishDate && (
-                      <text x={6} y={yOff + rh / 2 + 4} fontSize={9} fill="#e5e7eb" fontStyle="italic">no publish date</text>
-                    )}
-
-                    <line x1={0} y1={yOff + rh} x2={chartW} y2={yOff + rh} stroke="#e5e7eb" strokeWidth={0.5} />
+                    {bar}
+                    <line x1={0} y1={yOff + STEP_H} x2={chartW} y2={yOff + STEP_H} stroke="#f3f4f6" />
                   </g>
                 )
-                yOff += rh
-                return el
+                yOff += STEP_H; return el
               })
             })()}
 
             {/* Past gray wash */}
             {todayX > 0 && (
               <rect x={0} y={0} width={Math.min(todayX, chartW)} height={totalH}
-                fill="rgba(0,0,0,0.05)" style={{ pointerEvents: 'none' }} />
+                fill="rgba(0,0,0,0.055)" style={{ pointerEvents: 'none' }} />
             )}
 
             {/* Today line */}
