@@ -8,9 +8,10 @@ import { WORKFLOW_EVENTS } from '@/lib/workflowEvents'
 // ─── layout constants ─────────────────────────────────────────────────────────
 const DAY_W      = 38
 const LABEL_W    = 200
-const LANE_H     = 18
-const LANE_GAP   = 2
-const ROW_PAD    = 5
+const LANE_H     = 13
+const LANE_GAP   = 1
+const ROW_H      = 56    // fixed uniform height for every sector row
+const MAX_LANES  = 3
 const HEADER_H   = 52
 const DAYS_SHOWN = 56   // 8 weeks
 
@@ -96,8 +97,7 @@ export function SectorGrid({ sectors }: { sectors: Sector[] }) {
     return { sector: s, blocks, lanes: Math.max(1, blocks.reduce((m, b) => Math.max(m, b.lane), 0) + 1) }
   }), [display])
 
-  const rowH   = (lanes: number) => ROW_PAD * 2 + lanes * LANE_H + Math.max(0, lanes - 1) * LANE_GAP
-  const totalH = HEADER_H + sectorRows.reduce((s, r) => s + rowH(r.lanes), 0)
+  const totalH = HEADER_H + sectorRows.length * ROW_H
 
   return (
     <div className="w-full select-none">
@@ -143,7 +143,7 @@ export function SectorGrid({ sectors }: { sectors: Sector[] }) {
             <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Sector</span>
           </div>
           {sectorRows.map(({ sector: s, lanes }) => (
-            <div key={s.id} style={{ height: rowH(lanes) }}
+            <div key={s.id} style={{ height: ROW_H }}
               className="flex flex-col justify-center px-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
               onClick={() => window.location.href = `/roadmap/sectors/${s.id}`}>
               <div className="flex items-center gap-1.5">
@@ -193,42 +193,41 @@ export function SectorGrid({ sectors }: { sectors: Sector[] }) {
             })}
             <line x1={0} y1={HEADER_H} x2={chartW} y2={HEADER_H} stroke="#e5e7eb" />
 
-            {/* Rows */}
+            {/* Rows — fixed uniform height */}
             {(() => {
               let yOff = HEADER_H
-              return sectorRows.map(({ sector: s, blocks, lanes }) => {
-                const rh = rowH(lanes)
+              return sectorRows.map(({ sector: s, blocks }) => {
                 const el = (
                   <g key={s.id}>
                     {days.map((d, i) => {
                       const isSat = d.getUTCDay() === 6; const isSun = d.getUTCDay() === 0
                       return (
                         <g key={i}>
-                          {(isSat || isSun) && <rect x={i * DAY_W} y={yOff} width={DAY_W} height={rh} fill="#fafafa" />}
-                          <line x1={i * DAY_W} y1={yOff} x2={i * DAY_W} y2={yOff + rh} stroke="#f3f4f6" />
+                          {(isSat || isSun) && <rect x={i * DAY_W} y={yOff} width={DAY_W} height={ROW_H} fill="#fafafa" />}
+                          <line x1={i * DAY_W} y1={yOff} x2={i * DAY_W} y2={yOff + ROW_H} stroke="#f3f4f6" />
                         </g>
                       )
                     })}
                     {todayOff >= 0 && todayOff < DAYS_SHOWN && (
-                      <rect x={todayOff * DAY_W} y={yOff} width={DAY_W} height={rh} fill="#eef2ff" opacity={0.4} />
+                      <rect x={todayOff * DAY_W} y={yOff} width={DAY_W} height={ROW_H} fill="#eef2ff" opacity={0.4} />
                     )}
                     {!s.publishDate && (
-                      <text x={8} y={yOff + rh / 2 + 4} fontSize={10} fill="#d1d5db" fontStyle="italic">no publish date — click to set</text>
+                      <text x={8} y={yOff + ROW_H / 2 + 4} fontSize={10} fill="#d1d5db" fontStyle="italic">no publish date</text>
                     )}
-                    {blocks.map((b, bi) => {
+                    {blocks.filter(b => b.lane < MAX_LANES).map((b, bi) => {
                       const bs = daysBetween(viewStart, b.start)
                       const be = daysBetween(viewStart, b.end)
                       const cs = Math.max(0, bs); const ce = Math.min(DAYS_SHOWN - 1, be)
                       if (cs > ce) return null
                       const bx = cs * DAY_W + 1; const bw = Math.max((ce - cs + 1) * DAY_W - 2, 4)
-                      const by = yOff + ROW_PAD + b.lane * (LANE_H + LANE_GAP)
+                      const by = yOff + 3 + b.lane * (LANE_H + LANE_GAP)
                       return (
                         <g key={bi}>
                           <rect x={bx} y={by} width={bw} height={LANE_H} rx={2} fill={b.bg} stroke={b.border} strokeWidth={1} opacity={0.92} />
-                          {bs < 0 && <polygon points={`${bx},${by} ${bx+6},${by+LANE_H/2} ${bx},${by+LANE_H}`} fill={b.border} opacity={0.6} />}
-                          {be >= DAYS_SHOWN && <polygon points={`${bx+bw},${by} ${bx+bw-6},${by+LANE_H/2} ${bx+bw},${by+LANE_H}`} fill={b.border} opacity={0.6} />}
+                          {bs < 0 && <polygon points={`${bx},${by} ${bx+5},${by+LANE_H/2} ${bx},${by+LANE_H}`} fill={b.border} opacity={0.6} />}
+                          {be >= DAYS_SHOWN && <polygon points={`${bx+bw},${by} ${bx+bw-5},${by+LANE_H/2} ${bx+bw},${by+LANE_H}`} fill={b.border} opacity={0.6} />}
                           {bw > 20 && (
-                            <text x={bx + (bs < 0 ? 9 : 4)} y={by + LANE_H / 2 + 4} fontSize={8} fill={b.text} fontWeight="600"
+                            <text x={bx + (bs < 0 ? 8 : 3)} y={by + LANE_H / 2 + 3.5} fontSize={7.5} fill={b.text} fontWeight="600"
                               style={{ pointerEvents: 'none', userSelect: 'none' }}>
                               {bw > 80 ? b.label : bw > 35 ? b.label.split(' ')[0] : ''}
                             </text>
@@ -237,10 +236,10 @@ export function SectorGrid({ sectors }: { sectors: Sector[] }) {
                         </g>
                       )
                     })}
-                    <line x1={0} y1={yOff + rh} x2={chartW} y2={yOff + rh} stroke="#f3f4f6" />
+                    <line x1={0} y1={yOff + ROW_H} x2={chartW} y2={yOff + ROW_H} stroke="#f3f4f6" />
                   </g>
                 )
-                yOff += rh
+                yOff += ROW_H
                 return el
               })
             })()}

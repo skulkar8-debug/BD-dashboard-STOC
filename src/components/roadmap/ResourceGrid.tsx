@@ -7,11 +7,11 @@ import { WORKFLOW_EVENTS, type OwnerRole } from '@/lib/workflowEvents'
 
 // ─── layout constants ─────────────────────────────────────────────────────────
 const DAY_W      = 38
-const LABEL_W    = 200
-const TOTAL_W    = 48
-const LANE_H     = 18
-const LANE_GAP   = 2
-const ROW_PAD    = 5
+const LABEL_W    = 160   // no TOTAL_W column
+const LANE_H     = 13
+const LANE_GAP   = 1
+const ROW_H      = 56    // fixed uniform height for every person row
+const MAX_LANES  = 3     // lanes beyond this are clipped
 const HEADER_H   = 52
 const DAYS_SHOWN = 56
 
@@ -156,8 +156,7 @@ export function ResourceGrid({ sectors }: { sectors: Sector[] }) {
       })
   }, [scheduled])
 
-  const rowH   = (lanes: number) => ROW_PAD * 2 + lanes * LANE_H + Math.max(0, lanes - 1) * LANE_GAP
-  const totalH = HEADER_H + personRows.reduce((s, r) => s + rowH(r.lanes), 0)
+  const totalH = HEADER_H + personRows.length * ROW_H
 
   return (
     <div className="w-full select-none">
@@ -185,28 +184,20 @@ export function ResourceGrid({ sectors }: { sectors: Sector[] }) {
       {/* Grid: sticky label + scrollable chart */}
       <div className="rounded-xl border border-gray-200 bg-white overflow-hidden" style={{ display: 'flex' }}>
 
-        {/* Sticky person column */}
-        <div style={{ width: LABEL_W + TOTAL_W, minWidth: LABEL_W + TOTAL_W, position: 'sticky', left: 0, zIndex: 20 }}
+        {/* Sticky person column — name only, no role, no Days */}
+        <div style={{ width: LABEL_W, minWidth: LABEL_W, position: 'sticky', left: 0, zIndex: 20 }}
           className="shrink-0 border-r border-gray-200 bg-white">
           <div style={{ height: HEADER_H }} className="bg-gray-50 border-b border-gray-200 flex items-end px-3 pb-2">
             <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Person</span>
-            <span className="ml-auto text-[10px] font-bold uppercase tracking-wider text-gray-400">Days</span>
           </div>
           {personRows.map(row => (
-            <div key={row.name} style={{ height: rowH(row.lanes) }}
+            <div key={row.name} style={{ height: ROW_H }}
               className="flex items-center px-3 border-b border-gray-100">
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold text-gray-800 truncate">{row.name}</div>
-                <div className="text-[10px] text-gray-400">{row.role}</div>
-              </div>
-              <div className="ml-2 text-sm font-bold text-indigo-600 tabular-nums">{row.taskDays}</div>
+              <div className="text-sm font-semibold text-gray-800 truncate">{row.name}</div>
             </div>
           ))}
           <div style={{ height: 36 }} className="flex items-center px-3 bg-gray-50 border-t border-gray-200">
-            <span className="text-xs font-bold text-gray-600">Total</span>
-            <span className="ml-auto text-sm font-bold text-gray-700">
-              {personRows.reduce((s, r) => s + r.taskDays, 0)}
-            </span>
+            <span className="text-xs font-bold text-gray-600">{personRows.length} people</span>
           </div>
         </div>
 
@@ -241,51 +232,58 @@ export function ResourceGrid({ sectors }: { sectors: Sector[] }) {
             })}
             <line x1={0} y1={HEADER_H} x2={chartW} y2={HEADER_H} stroke="#e5e7eb" />
 
-            {/* Person rows */}
+            {/* Person rows — fixed uniform height */}
             {(() => {
               let yOff = HEADER_H
               return personRows.map(row => {
-                const rh = rowH(row.lanes)
                 const el = (
                   <g key={row.name}>
                     {days.map((d, i) => {
                       const isSat = d.getUTCDay() === 6; const isSun = d.getUTCDay() === 0
                       return (
                         <g key={i}>
-                          {(isSat || isSun) && <rect x={i * DAY_W} y={yOff} width={DAY_W} height={rh} fill="#fafafa" />}
-                          <line x1={i * DAY_W} y1={yOff} x2={i * DAY_W} y2={yOff + rh} stroke="#f3f4f6" />
+                          {(isSat || isSun) && <rect x={i * DAY_W} y={yOff} width={DAY_W} height={ROW_H} fill="#fafafa" />}
+                          <line x1={i * DAY_W} y1={yOff} x2={i * DAY_W} y2={yOff + ROW_H} stroke="#f3f4f6" />
                         </g>
                       )
                     })}
                     {todayOff >= 0 && todayOff < DAYS_SHOWN && (
-                      <rect x={todayOff * DAY_W} y={yOff} width={DAY_W} height={rh} fill="#eef2ff" opacity={0.4} />
+                      <rect x={todayOff * DAY_W} y={yOff} width={DAY_W} height={ROW_H} fill="#eef2ff" opacity={0.4} />
                     )}
-                    {row.blocks.map((b, bi) => {
+                    {/* Clip blocks to MAX_LANES within fixed row height */}
+                    {row.blocks.filter(b => b.lane < MAX_LANES).map((b, bi) => {
                       const bs = daysBetween(viewStart, b.startDate)
                       const be = daysBetween(viewStart, b.endDate)
                       const cs = Math.max(0, bs); const ce = Math.min(DAYS_SHOWN - 1, be)
                       if (cs > ce) return null
                       const bx = cs * DAY_W + 1; const bw = Math.max((ce - cs + 1) * DAY_W - 2, 4)
-                      const by = yOff + ROW_PAD + b.lane * (LANE_H + LANE_GAP)
+                      const by = yOff + 3 + b.lane * (LANE_H + LANE_GAP)
                       return (
                         <g key={bi}>
                           <rect x={bx} y={by} width={bw} height={LANE_H} rx={2} fill={b.bg} stroke={b.border} strokeWidth={1} opacity={0.92} />
-                          {bs < 0 && <polygon points={`${bx},${by} ${bx+6},${by+LANE_H/2} ${bx},${by+LANE_H}`} fill={b.border} opacity={0.6} />}
-                          {be >= DAYS_SHOWN && <polygon points={`${bx+bw},${by} ${bx+bw-6},${by+LANE_H/2} ${bx+bw},${by+LANE_H}`} fill={b.border} opacity={0.6} />}
+                          {bs < 0 && <polygon points={`${bx},${by} ${bx+5},${by+LANE_H/2} ${bx},${by+LANE_H}`} fill={b.border} opacity={0.6} />}
+                          {be >= DAYS_SHOWN && <polygon points={`${bx+bw},${by} ${bx+bw-5},${by+LANE_H/2} ${bx+bw},${by+LANE_H}`} fill={b.border} opacity={0.6} />}
                           {bw > 20 && (
-                            <text x={bx + (bs < 0 ? 9 : 4)} y={by + LANE_H / 2 + 4} fontSize={8} fill={b.text} fontWeight="600"
+                            <text x={bx + (bs < 0 ? 8 : 3)} y={by + LANE_H / 2 + 3.5} fontSize={7.5} fill={b.text} fontWeight="600"
                               style={{ pointerEvents: 'none', userSelect: 'none' }}>
-                              {bw > 100 ? `${b.sector} · ${b.label}` : bw > 50 ? b.sector : bw > 25 ? b.sector.split(' ')[0] : ''}
+                              {bw > 100 ? `${b.sector} · ${b.label}` : bw > 50 ? b.sector : bw > 22 ? b.sector.split(' ')[0] : ''}
                             </text>
                           )}
                           <title>{`${row.name} — ${b.label} (${b.wfSteps})\nSector: ${b.sector}\n${b.startDate.toISOString().split('T')[0]} → ${b.endDate.toISOString().split('T')[0]}`}</title>
                         </g>
                       )
                     })}
-                    <line x1={0} y1={yOff + rh} x2={chartW} y2={yOff + rh} stroke="#f3f4f6" />
+                    {/* "+N more" if blocks were clipped */}
+                    {row.blocks.filter(b => b.lane >= MAX_LANES).length > 0 && (
+                      <text x={4} y={yOff + ROW_H - 4} fontSize={7} fill="#9ca3af"
+                        style={{ pointerEvents: 'none', userSelect: 'none' }}>
+                        +{row.blocks.filter(b => b.lane >= MAX_LANES).length} more
+                      </text>
+                    )}
+                    <line x1={0} y1={yOff + ROW_H} x2={chartW} y2={yOff + ROW_H} stroke="#f3f4f6" />
                   </g>
                 )
-                yOff += rh
+                yOff += ROW_H
                 return el
               })
             })()}

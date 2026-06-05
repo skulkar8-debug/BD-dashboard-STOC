@@ -126,11 +126,12 @@ export function CalendarMonthView({ events, sectors, onSectorClick }: Props) {
                       const color  = EVENT_TEXT[e.type]   ?? '#374151'
                       return (
                         <div key={j}
-                          className="flex items-center gap-1 px-1 py-0.5 rounded text-[9px] font-medium border truncate"
+                          className="flex items-center gap-1 px-1 py-0.5 rounded text-[9px] font-semibold border truncate leading-tight"
                           style={{ background: bg, borderColor: border, color }}
+                          title={`${e.type} · ${e.sector} · ${e.owner}`}
                         >
-                          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: border }} />
-                          <span className="truncate">{e.sector}</span>
+                          <span className="w-1.5 h-1.5 rounded-full shrink-0 flex-none" style={{ background: border }} />
+                          <span className="truncate">{e.type}</span>
                         </div>
                       )
                     })}
