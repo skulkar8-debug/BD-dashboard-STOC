@@ -95,14 +95,23 @@ export default function SectorsPage() {
   const allMPs = [...new Set(data.sectors.map(s => s.mp).filter(Boolean))].sort()
   const allBDs = [...new Set(data.sectors.map(s => s.bd).filter(Boolean))].sort()
 
-  const filtered = data.sectors.filter(s => {
-    if (search    && !s.name.toLowerCase().includes(search.toLowerCase()) && !s.id.toLowerCase().includes(search.toLowerCase())) return false
-    if (statusF   && s.status   !== statusF)   return false
-    if (priorityF && s.priority !== priorityF) return false
-    if (mpF       && s.mp       !== mpF)       return false
-    if (bdF       && s.bd       !== bdF)       return false
-    return true
-  })
+  const filtered = data.sectors
+    .filter(s => {
+      if (search    && !s.name.toLowerCase().includes(search.toLowerCase()) && !s.id.toLowerCase().includes(search.toLowerCase())) return false
+      if (statusF   && s.status   !== statusF)   return false
+      if (priorityF && s.priority !== priorityF) return false
+      if (mpF       && s.mp       !== mpF)       return false
+      if (bdF       && s.bd       !== bdF)       return false
+      return true
+    })
+    .sort((a, b) => {
+      // Sectors with publish dates first, sorted by date ascending
+      // Sectors without publish dates last, sorted by sector ID
+      if (a.publishDate && b.publishDate) return a.publishDate.localeCompare(b.publishDate)
+      if (a.publishDate && !b.publishDate) return -1
+      if (!a.publishDate && b.publishDate) return 1
+      return a.id.localeCompare(b.id)
+    })
 
   const saveField = (id: string, field: keyof Sector, value: string) => {
     const s = data.sectors.find(x => x.id === id)
