@@ -819,10 +819,11 @@ function EmailList({ emails }: { emails: NormalizedEmail[] }) {
 // ─── Inbox ────────────────────────────────────────────────────────────────────
 
 function InboxTab({ emails }: { emails: NormalizedEmail[] }) {
-  const [showAll, setShowAll] = useState(false);
+  const [positiveOnly, setPositiveOnly] = useState(false);
   const [classFilter, setClassFilter] = useState('');
   const positive = emails.filter((e) => e.is_positive);
-  const base = showAll ? emails : positive;
+  // Default: show ALL replies — use Positives filter in the filter bar to narrow
+  const base = positiveOnly ? positive : emails;
   const display = classFilter ? base.filter((e) => e.final_classification === classFilter) : base;
   const sorted = [...display].sort((a, b) => b.timestamp_email.localeCompare(a.timestamp_email));
 
@@ -830,14 +831,15 @@ function InboxTab({ emails }: { emails: NormalizedEmail[] }) {
     <div className="space-y-3">
       <div className="flex items-center gap-3 flex-wrap">
         <div className="text-sm font-semibold text-gray-700">
-          <span className="text-emerald-600">{positive.length}</span> positive replies · {emails.length} total received
+          <span className="text-emerald-600">{positive.length}</span> positive · {emails.length} total received
+          {positiveOnly ? ' (positive only)' : ''}
         </div>
         <div className="bg-amber-50 border border-amber-200 text-amber-700 text-[11px] rounded px-2 py-1">
-          Source: actual <code>/api/v2/emails?email_type=received</code> — not analytics reply_count
+          Source: actual <code>/api/v2/emails?email_type=received</code>
         </div>
-        <button onClick={() => setShowAll((v) => !v)}
-          className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors">
-          {showAll ? 'Positive only' : 'Show all replies'}
+        <button onClick={() => setPositiveOnly((v) => !v)}
+          className={`text-xs px-3 py-1.5 rounded-lg transition-colors border ${positiveOnly ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'bg-gray-100 border-gray-200 text-gray-600 hover:bg-gray-200'}`}>
+          {positiveOnly ? '✓ Positive only' : 'Show positive only'}
         </button>
         <select value={classFilter} onChange={(e) => setClassFilter(e.target.value)}
           className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none">
@@ -848,7 +850,7 @@ function InboxTab({ emails }: { emails: NormalizedEmail[] }) {
       {sorted.length === 0 && (
         <div className="text-center py-12 text-gray-400">
           <div className="text-3xl mb-2">📭</div>
-          <div className="text-sm">{showAll ? 'No replies in current filter' : 'No positive replies in current filter'}</div>
+          <div className="text-sm">No replies match current filters</div>
         </div>
       )}
       <EmailList emails={sorted} />
