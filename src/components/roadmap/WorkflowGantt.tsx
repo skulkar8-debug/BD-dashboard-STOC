@@ -64,31 +64,12 @@ export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
   // All collapsed by default
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
 
+  // Sectors come pre-filtered from the parent Calendar page
+  const filtered = sectors
+
   const toggle      = useCallback((id: string) => setExpanded(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n }), [])
-  const expandAll   = () => setExpanded(new Set(filtered.map(s => s.id)))
+  const expandAll   = () => setExpanded(new Set(sectors.map(s => s.id)))
   const collapseAll = () => setExpanded(new Set())
-
-  // ── Filters ────────────────────────────────────────────────────────────────
-  const [filterStatus,    setFilterStatus]    = useState('')
-  const [filterPriority,  setFilterPriority]  = useState('')
-  const [filterMP,        setFilterMP]        = useState('')
-  const [filterBD,        setFilterBD]        = useState('')
-  const [filterScheduled, setFilterScheduled] = useState(false)
-
-  const allMPs = useMemo(() => [...new Set(sectors.map(s => s.mp).filter(Boolean))].sort(), [sectors])
-  const allBDs = useMemo(() => [...new Set(sectors.map(s => s.bd).filter(Boolean))].sort(), [sectors])
-
-  const filtered = useMemo(() => sectors.filter(s => {
-    if (filterStatus   && s.status   !== filterStatus)   return false
-    if (filterPriority && s.priority !== filterPriority) return false
-    if (filterMP       && s.mp       !== filterMP)       return false
-    if (filterBD       && s.bd       !== filterBD)       return false
-    if (filterScheduled && !s.publishDate)               return false
-    return true
-  }), [sectors, filterStatus, filterPriority, filterMP, filterBD, filterScheduled])
-
-  const hasFilters = !!(filterStatus || filterPriority || filterMP || filterBD || filterScheduled)
-  const clearFilters = () => { setFilterStatus(''); setFilterPriority(''); setFilterMP(''); setFilterBD(''); setFilterScheduled(false) }
 
   // ── Timeline ───────────────────────────────────────────────────────────────
   const [viewStart, setViewStart] = useState<Date>(() =>
@@ -133,36 +114,8 @@ export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
     [filtered, expanded]
   )
 
-  const sel = 'border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300'
-
   return (
     <div className="w-full select-none">
-
-      {/* Filters */}
-      <div className="flex gap-2 mb-3 flex-wrap items-center">
-        <select className={sel} value={filterStatus}    onChange={e => setFilterStatus(e.target.value)}>
-          <option value="">All Statuses</option>
-          {['Planning','In Progress','Published','Completed'].map(s => <option key={s}>{s}</option>)}
-        </select>
-        <select className={sel} value={filterPriority} onChange={e => setFilterPriority(e.target.value)}>
-          <option value="">All Priorities</option>
-          {['High','Medium','Low'].map(p => <option key={p}>{p}</option>)}
-        </select>
-        <select className={sel} value={filterMP} onChange={e => setFilterMP(e.target.value)}>
-          <option value="">All MPs</option>
-          {allMPs.map(m => <option key={m}>{m}</option>)}
-        </select>
-        <select className={sel} value={filterBD} onChange={e => setFilterBD(e.target.value)}>
-          <option value="">All BD</option>
-          {allBDs.map(b => <option key={b}>{b}</option>)}
-        </select>
-        <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
-          <input type="checkbox" checked={filterScheduled} onChange={e => setFilterScheduled(e.target.checked)} />
-          Scheduled only
-        </label>
-        {hasFilters && <button onClick={clearFilters} className="text-xs text-indigo-600 hover:underline">Clear</button>}
-        <span className="text-xs text-gray-400 ml-auto">{filtered.length} of {sectors.length} sectors</span>
-      </div>
 
       {/* Timeline nav + expand controls */}
       <div className="flex items-center gap-2 mb-3 flex-wrap">
