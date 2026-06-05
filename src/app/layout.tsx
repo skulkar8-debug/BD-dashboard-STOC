@@ -10,8 +10,8 @@ const poppins = Poppins({
 });
 
 export const metadata: Metadata = {
-  title: "STOC | Embark Pipeline Dashboard",
-  description: "Embark pet services acquisition pipeline",
+  title: "STOC | Sector Roadmap",
+  description: "Internal sector roadmap, calendar, reminders, and Data + TIP tracker",
 };
 
 export default function RootLayout({
