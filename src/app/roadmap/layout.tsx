@@ -11,8 +11,9 @@ export default function RoadmapLayout({ children }: { children: React.ReactNode 
       <Sidebar />
       <div className="flex flex-col flex-1 min-w-0">
         {/* Prototype banner */}
-        <div className="sticky top-0 z-40 bg-amber-50 border-b border-amber-200 px-4 py-2 text-center text-xs font-medium text-amber-800">
-          ⚠️ Prototype Mode — Live Google Sheet sync not connected yet.
+        <div className="sticky top-0 z-40 bg-indigo-50 border-b border-indigo-200 px-4 py-2 text-center text-xs font-medium text-indigo-700">
+          🔗 Prototype Mode — Google Sheet sync connected via gviz/tq · Edits save to localStorage · Go to{' '}
+          <a href="/roadmap/settings" className="underline hover:text-indigo-900">Settings</a> to sync latest data.
         </div>
         <main className="flex-1 overflow-y-auto">
           {children}
