@@ -80,10 +80,7 @@ export function useStore() {
   const updateReminder = useCallback((u: Reminder) => save({ ...base, reminders: base.reminders.map(r => r.id === u.id ? u : r) }), [base, save])
   const deleteReminder = useCallback((id: string)  => save({ ...base, reminders: base.reminders.filter(r => r.id !== id) }), [base, save])
 
-  // ── Calendar event (manual add — rare) ────────────────────────────────────
-  const addCalendarEvent = useCallback((_e: CalendarEvent) => {
-    // Manual calendar events are not persisted in this prototype — calendar is derived
-  }, [])
+  // Calendar is always derived from sectors — no manual add needed
 
   // ── Data + TIP ────────────────────────────────────────────────────────────
   const updateDataTip = useCallback((u: DataTipItem) => save({ ...base, dataTip: base.dataTip.map(t => t.sector === u.sector ? u : t) }), [base, save])
@@ -108,18 +105,25 @@ export function useStore() {
     data,
     addSector, updateSector,
     addReminder, updateReminder, deleteReminder,
-    addCalendarEvent,
     updateDataTip,
     resetToSeed, exportJson,
   }
 }
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
-export const TODAY = new Date('2026-06-05')
+// Always compute today at call-time so calculations stay accurate as real dates advance
+export function getToday(): Date {
+  const d = new Date()
+  d.setUTCHours(0, 0, 0, 0)
+  return d
+}
+
+/** @deprecated import getToday() for fresh value; this export is kept for legacy callers */
+export const TODAY = getToday()
 
 export function daysFrom(dateStr: string): number | null {
   if (!dateStr) return null
-  return Math.round((new Date(dateStr).getTime() - TODAY.getTime()) / 86_400_000)
+  return Math.round((new Date(dateStr + 'T00:00:00Z').getTime() - getToday().getTime()) / 86_400_000)
 }
 
 export function fmtDate(dateStr: string): string {

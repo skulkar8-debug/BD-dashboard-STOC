@@ -72,13 +72,16 @@ export function DataReadyBadge({ value }: { value: DataReady }) {
 }
 
 export function EventTypeBadge({ type }: { type: string }) {
-  const cls: Record<string, string> = {
-    'Report Publish':   'bg-green-100 text-green-800',
-    'LinkedIn Outreach':'bg-blue-100 text-blue-800',
-    'TIP Creation':     'bg-orange-100 text-orange-800',
-    'TIP Send':         'bg-purple-100 text-purple-800',
-    'Follow-up':        'bg-yellow-100 text-yellow-800',
-    Reminder:           'bg-gray-100 text-gray-700',
+  // Colors derived directly from WORKFLOW_EVENTS so they never go stale
+  const { WORKFLOW_EVENTS: WF } = require('@/lib/workflowEvents')
+  const ev = (WF as { label: string; bg: string; border: string; text: string }[]).find(e => e.label === type)
+  if (ev) {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border"
+        style={{ background: ev.bg, borderColor: ev.border, color: ev.text }}>
+        {type}
+      </span>
+    )
   }
-  return <Chip label={type} className={cls[type] ?? 'bg-gray-100 text-gray-700'} />
+  return <Chip label={type} className="bg-gray-100 text-gray-700" />
 }

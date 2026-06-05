@@ -68,9 +68,11 @@ async function fetchSectors(): Promise<Sector[]> {
   //         Report Link, TIP Link, Source Data Link, Clay Export Link, Notes, Last Updated
 
   const STATUS_MAP: Record<string, SectorStatus> = {
-    'completed': 'Completed',
-    'planned':   'Planning',
-    'in progress':'In Progress',
+    'completed':    'Completed',
+    'planned':      'Planning',
+    'planning':     'Planning',   // handle both casings from sheet
+    'active':       'In Progress',
+    'in progress':  'In Progress',
     'published': 'Published',
   }
 
@@ -159,13 +161,9 @@ export async function syncFromGoogleSheet(
       }
     })
 
-    // Rebuild calendar + reminders from updated sectors
-    const { SEED_DATA } = await import('./seedData')
-    // We'll use the sector-derived approach from store.ts
-    // by importing the derive helpers — but those are inside the store.
-    // For simplicity, keep existing calendar/reminders and merge new sector dates.
-    // The store will re-derive on next load from the updated sector publish dates.
-
+    // Calendar is derived from sectors automatically in store.ts (deriveCalendar).
+    // Reminders are derived from sectors in seedData.ts (sectorToReminders).
+    // Both will be recomputed on next app load from the updated sector dates.
     const nextData: AppData = {
       ...currentData,
       sectors: merged,

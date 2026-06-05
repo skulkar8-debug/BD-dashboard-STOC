@@ -128,7 +128,7 @@ export default function RemindersPage() {
       <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 mb-5 text-xs text-indigo-700 space-y-1">
         <div className="font-semibold text-indigo-800 mb-1">Reminder Logic</div>
         <div>• <strong>14d before publish:</strong> BD starts LinkedIn / industry group outreach</div>
-        <div>• <strong>7d before publish:</strong> BD + Senior Manager confirm connections are in motion</div>
+        <div>• <strong>7d before publish:</strong> BD confirms connections are in motion and report send list is ready</div>
         <div>• <strong>Publish week:</strong> MR coordinates publishing, BD sends report, SM supports TIP send</div>
         <div>• <strong>After publish:</strong> BD follows up and captures intel</div>
       </div>

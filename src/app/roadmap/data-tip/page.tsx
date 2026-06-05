@@ -203,7 +203,7 @@ export default function DataTipPage() {
                   {/* Source Location */}
                   <td className="px-3 py-2">
                     {e('sourceLoc')
-                      ? <InlineDrop value={t.sourceDataLocation as TipStatus} options={SOURCE_LOCS as TipStatus[]} onSave={v => save(t.sector, { sourceDataLocation: v })} />
+                      ? <InlineDrop<string> value={t.sourceDataLocation} options={SOURCE_LOCS} onSave={v => save(t.sector, { sourceDataLocation: v })} />
                       : <EditCell onClick={() => startEdit(t.sector, 'sourceLoc')}>
                           <span className="text-xs text-gray-600">{t.sourceDataLocation || <span className="text-gray-300 italic">—</span>}</span>
                         </EditCell>

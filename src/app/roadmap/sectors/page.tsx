@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { Plus, ExternalLink, Check, X, ChevronDown } from 'lucide-react'
 import { useStore, fmtDate } from '@/lib/store'
 import { StatusBadge, PriorityBadge } from '@/components/roadmap/StatusBadge'
@@ -59,17 +60,12 @@ function InlineDateInput({ value, onSave, onCancel }: { value: string; onSave: (
   )
 }
 
-// ── Add Sector form ────────────────────────────────────────────────────────────
-function AddSectorModal({ people, onSave, onClose }: { people: Sector['mp'][], onClose: () => void, onSave: (s: Sector) => void }) {
-  const mps  = people.filter((_, i, a) => a.indexOf(_) === i)  // unique
-  return null // placeholder — handled inline below
-}
-
 // ── Main page ──────────────────────────────────────────────────────────────────
 type EditCell = { id: string; field: 'status' | 'priority' | 'publishDate' | 'mp' | 'bd' | 'sm' }
 
 export default function SectorsPage() {
   const { data, addSector, updateSector } = useStore()
+  const router = useRouter()
 
   // Filters
   const [search,    setSearch]    = useState('')
@@ -190,7 +186,7 @@ export default function SectorsPage() {
       </div>
 
       <div className="text-[10px] text-gray-400 mb-2 ml-1">
-        💡 <strong>Tip:</strong> Click Status, Priority, Publish Date, MP, or BD cells to edit inline.
+        💡 <strong>Tip:</strong> Click Status, Priority, Publish Date, MP, BD, or SM cells to edit inline.
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden overflow-x-auto">
@@ -229,7 +225,7 @@ export default function SectorsPage() {
               <tr
                 key={s.id}
                 className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition-colors"
-                onClick={() => { if (!editing) window.location.href = `/roadmap/sectors/${s.id}` }}
+                onClick={() => { if (!editing) router.push(`/roadmap/sectors/${s.id}`) }}
               >
                 <td className="px-3 py-2 text-xs text-gray-400 font-semibold">{s.id}</td>
                 <td className="px-3 py-2 font-semibold text-gray-900 whitespace-nowrap max-w-[180px]">
@@ -285,7 +281,7 @@ export default function SectorsPage() {
                 <td className="px-3 py-2" onClick={e => startEdit(e, s.id, 'mp')}>
                   {isEditing(s.id, 'mp')
                     ? <InlineSelect
-                        value={s.mp as SectorStatus} options={mps as SectorStatus[]}
+                        value={s.mp} options={mps}
                         onSave={v => saveField(s.id, 'mp', v)}
                         onCancel={() => setEditing(null)}
                       />
@@ -300,7 +296,7 @@ export default function SectorsPage() {
                 <td className="px-3 py-2" onClick={e => startEdit(e, s.id, 'bd')}>
                   {isEditing(s.id, 'bd')
                     ? <InlineSelect
-                        value={s.bd as SectorStatus} options={bds as SectorStatus[]}
+                        value={s.bd} options={bds}
                         onSave={v => saveField(s.id, 'bd', v)}
                         onCancel={() => setEditing(null)}
                       />
@@ -315,7 +311,7 @@ export default function SectorsPage() {
                 <td className="px-3 py-2" onClick={e => startEdit(e, s.id, 'sm')}>
                   {isEditing(s.id, 'sm')
                     ? <InlineSelect
-                        value={s.sm as SectorStatus} options={sms as SectorStatus[]}
+                        value={s.sm} options={sms}
                         onSave={v => saveField(s.id, 'sm', v)}
                         onCancel={() => setEditing(null)}
                       />

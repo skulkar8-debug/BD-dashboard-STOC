@@ -75,17 +75,12 @@ function computeLanedBlocks(pub: Date): LanedBlock[] {
 
 // ─── component ────────────────────────────────────────────────────────────────
 export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
-  const today = new Date('2026-06-05T00:00:00Z')
+  const today = (() => { const d = new Date(); d.setUTCHours(0,0,0,0); return d })()
 
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const toggle      = useCallback((id: string) => setExpanded(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n }), [])
   const expandAll   = () => setExpanded(new Set(sectors.map(s => s.id)))
   const collapseAll = () => setExpanded(new Set())
-
-  const firstScheduled = useMemo(
-    () => [...sectors].filter(s => !!s.publishDate).sort((a, b) => a.publishDate.localeCompare(b.publishDate))[0],
-    [sectors]
-  )
 
   // Default: show today-centered window
   const [viewStart, setViewStart] = useState<Date>(() => addDays(today, -14))

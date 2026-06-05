@@ -41,14 +41,5 @@ export const WORKFLOW_EVENTS: WorkflowEvent[] = [
   { key: 'mpcall',     wfSteps: 'WF17',    phase: 'Calls/Intel',   label: 'MP Follow-on',       bg: '#fce7f3', border: '#ec4899', text: '#831843', sOff: 15,  eOff: 21,  owners: ['mp']         },
 ]
 
-// Quick lookup by event key
+// Quick lookup by event key (available for future use)
 export const WF_BY_KEY = Object.fromEntries(WORKFLOW_EVENTS.map(e => [e.key, e]))
-
-// Phase color map
-export const PHASE_COLORS: Record<string, string> = {
-  'Research/Data': '#6366f1',
-  'Report':        '#22c55e',
-  'Outreach':      '#3b82f6',
-  'TIP':           '#f97316',
-  'Calls/Intel':   '#eab308',
-}

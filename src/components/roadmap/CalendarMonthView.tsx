@@ -12,13 +12,6 @@ interface Props {
 }
 
 // Build color maps dynamically from WORKFLOW_EVENTS
-function hexToRgb(hex: string) {
-  const r = parseInt(hex.slice(1,3),16)
-  const g = parseInt(hex.slice(3,5),16)
-  const b = parseInt(hex.slice(5,7),16)
-  return `rgb(${r},${g},${b})`
-}
-
 const EVENT_BG:     Record<string, string> = {}
 const EVENT_BORDER: Record<string, string> = {}
 const EVENT_TEXT:   Record<string, string> = {}
@@ -31,9 +24,11 @@ WORKFLOW_EVENTS.forEach(ev => {
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
+function getToday() { const d = new Date(); d.setUTCHours(0,0,0,0); return d }
+
 export function CalendarMonthView({ events, sectors, onSectorClick }: Props) {
-  const today = new Date('2026-06-05T00:00:00Z')
-  const [current, setCurrent] = useState(() => new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)))
+  const today = getToday()
+  const [current, setCurrent] = useState(() => { const t = getToday(); return new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), 1)) })
   const [selectedDay, setSelectedDay] = useState<string | null>(null)
 
   const year  = current.getUTCFullYear()

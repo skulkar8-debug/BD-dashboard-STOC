@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import type { Sector } from '@/lib/types'
-import { WORKFLOW_EVENTS, type OwnerRole } from '@/lib/workflowEvents'
+import { WORKFLOW_EVENTS, ROLE_LABELS, type OwnerRole } from '@/lib/workflowEvents'
 
 // ─── layout constants ─────────────────────────────────────────────────────────
 const DAY_W      = 38
@@ -34,13 +34,7 @@ interface PersonRow {
 }
 
 const ROLE_ORDER: OwnerRole[] = ['mr', 'mrsupport', 'bd', 'sm', 'mp']
-const ROLE_LABELS: Record<OwnerRole, string> = {
-  mr:        'Market Research',
-  mrsupport: 'MR Support',
-  bd:        'BD',
-  sm:        'Senior Manager',
-  mp:        'MP',
-}
+// ROLE_LABELS imported from workflowEvents.ts (single source of truth)
 
 function assignLanes(blocks: Omit<Block, 'lane'>[]): Block[] {
   const ends: Date[] = []
@@ -61,11 +55,12 @@ export function ResourceGrid({ sectors }: { sectors: Sector[] }) {
   )
 
   const [viewStart, setViewStart] = useState<Date>(() => {
-    if (!scheduled.length) return new Date('2026-05-01T00:00:00Z')
+    const t = new Date(); t.setUTCHours(0,0,0,0)
+    if (!scheduled.length) return addDays(t, -14)
     return addDays(utcDate(scheduled[0].publishDate), -38)
   })
 
-  const today    = new Date('2026-06-05T00:00:00Z')
+  const today = (() => { const d = new Date(); d.setUTCHours(0,0,0,0); return d })()
   const viewEnd  = addDays(viewStart, DAYS_SHOWN - 1)
   const chartW   = DAYS_SHOWN * DAY_W
   const todayOff = daysBetween(viewStart, today)
