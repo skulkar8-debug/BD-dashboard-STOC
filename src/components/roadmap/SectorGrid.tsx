@@ -3,48 +3,46 @@
 import { useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import type { Sector } from '@/lib/types'
+import { WORKFLOW_EVENTS } from '@/lib/workflowEvents'
 
-// ─── constants ────────────────────────────────────────────────────────────────
-const DAY_W      = 44
-const LABEL_W    = 200   // sector name column (sticky)
-const LANE_H     = 20
+// ─── layout constants ─────────────────────────────────────────────────────────
+const DAY_W      = 38
+const LABEL_W    = 200
+const LANE_H     = 18
 const LANE_GAP   = 2
-const ROW_PAD    = 6
+const ROW_PAD    = 5
 const HEADER_H   = 52
-const DAYS_SHOWN = 42    // 6 weeks visible
-
-const ETYPES = [
-  { key: 'connect',   label: 'LinkedIn Outreach',  bg: '#bfdbfe', border: '#3b82f6', text: '#1e3a8a', sOff: -14, eOff: -1  },
-  { key: 'publish',   label: 'Report Publish',      bg: '#bbf7d0', border: '#22c55e', text: '#14532d', sOff:  0,  eOff:  0  },
-  { key: 'tipcreate', label: 'TIP Create',           bg: '#fed7aa', border: '#f97316', text: '#7c2d12', sOff:  1,  eOff:  1  },
-  { key: 'tipsend',   label: 'TIP Send',             bg: '#e9d5ff', border: '#a855f7', text: '#4c1d95', sOff:  5,  eOff:  5  },
-  { key: 'followup',  label: 'Follow-up / Intel',    bg: '#fef08a', border: '#eab308', text: '#713f12', sOff:  8,  eOff: 14  },
-] as const
+const DAYS_SHOWN = 56   // 8 weeks
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 function utcDate(s: string) { return new Date(s + 'T00:00:00Z') }
 function addDays(d: Date, n: number) { const r = new Date(d); r.setUTCDate(r.getUTCDate() + n); return r }
 function daysBetween(a: Date, b: Date) { return Math.round((b.getTime() - a.getTime()) / 86_400_000) }
-function fmtDay(d: Date)  { return d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }).slice(0, 2) }
-function fmtNum(d: Date)  { return d.toLocaleDateString('en-US', { day: 'numeric', timeZone: 'UTC' }) }
+function fmtDay(d: Date) { return d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }).slice(0, 2) }
+function fmtNum(d: Date) { return d.toLocaleDateString('en-US', { day: 'numeric', timeZone: 'UTC' }) }
 
-// ─── component ────────────────────────────────────────────────────────────────
+const STATUS_DOT: Record<string, string> = {
+  Planning:      '#9ca3af',
+  'In Progress': '#60a5fa',
+  Published:     '#34d399',
+  Completed:     '#a78bfa',
+}
+
 export function SectorGrid({ sectors }: { sectors: Sector[] }) {
   const scheduled = useMemo(
     () => [...sectors.filter(s => !!s.publishDate)].sort((a, b) => a.publishDate.localeCompare(b.publishDate)),
     [sectors]
   )
-
+  const [showAll, setShowAll]   = useState(false)
   const [viewStart, setViewStart] = useState<Date>(() => {
-    if (!scheduled.length) return new Date('2026-05-20T00:00:00Z')
-    return addDays(utcDate(scheduled[0].publishDate), -18)
+    if (!scheduled.length) return new Date('2026-05-01T00:00:00Z')
+    return addDays(utcDate(scheduled[0].publishDate), -38)
   })
-  const [showAll, setShowAll] = useState(false)
 
-  const today    = new Date('2026-06-05T00:00:00Z')
-  const viewEnd  = addDays(viewStart, DAYS_SHOWN - 1)
-  const display  = showAll ? sectors : scheduled
-  const chartW   = DAYS_SHOWN * DAY_W
+  const today   = new Date('2026-06-05T00:00:00Z')
+  const viewEnd = addDays(viewStart, DAYS_SHOWN - 1)
+  const display = showAll ? sectors : scheduled
+  const chartW  = DAYS_SHOWN * DAY_W
   const todayOff = daysBetween(viewStart, today)
 
   const days = useMemo(
@@ -52,11 +50,10 @@ export function SectorGrid({ sectors }: { sectors: Sector[] }) {
     [viewStart]
   )
 
-  // Month spans
   const monthSpans = useMemo(() => {
     const spans: { label: string; x: number; w: number }[] = []
     days.forEach((d, i) => {
-      const lbl = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+      const lbl = d.toLocaleDateString('en-US', { month: 'short', year: '2-digit', timeZone: 'UTC' })
       const last = spans[spans.length - 1]
       if (last?.label === lbl) last.w += DAY_W
       else spans.push({ label: lbl, x: i * DAY_W, w: DAY_W })
@@ -64,27 +61,30 @@ export function SectorGrid({ sectors }: { sectors: Sector[] }) {
     return spans
   }, [days])
 
-  const rowH = (lanes: number) => ROW_PAD * 2 + lanes * LANE_H + Math.max(0, lanes - 1) * LANE_GAP
-
-  // For each sector row, compute block lanes (events don't overlap — sequential)
-  // We pack them all in lane 0 since they're sequential per sector
-  // But blocks from different event types may overlap for point events (publish+tipcreate close together)
-  // Assign lanes greedily
+  // For each sector: compute all blocks and assign lanes
   const sectorRows = useMemo(() => display.map(s => {
     if (!s.publishDate) return { sector: s, blocks: [], lanes: 1 }
     const pub = utcDate(s.publishDate)
 
-    const rawBlocks = ETYPES.map(et => ({
-      key:   et.key,
-      label: et.label,
-      bg:    et.bg,
-      border:et.border,
-      text:  et.text,
-      start: addDays(pub, et.sOff),
-      end:   addDays(pub, et.eOff),
+    // Get owner name per role
+    const ownerMap: Record<string, string> = {
+      mr: s.mr, mrsupport: s.mrSupport, bd: s.bd, sm: s.sm, mp: s.mp,
+    }
+
+    const rawBlocks = WORKFLOW_EVENTS.map(ev => ({
+      key:    ev.key,
+      label:  ev.label,
+      bg:     ev.bg,
+      border: ev.border,
+      text:   ev.text,
+      start:  addDays(pub, ev.sOff),
+      end:    addDays(pub, ev.eOff),
+      owner:  ev.owners.map(r => ownerMap[r]).filter(Boolean).join(', '),
+      phase:  ev.phase,
+      wfSteps: ev.wfSteps,
     }))
 
-    // Lane assignment
+    // Lane assignment (greedy)
     const laneEnds: Date[] = []
     const blocks = rawBlocks.map(b => {
       let lane = laneEnds.findIndex(e => b.start >= e)
@@ -92,31 +92,25 @@ export function SectorGrid({ sectors }: { sectors: Sector[] }) {
       else laneEnds[lane] = addDays(b.end, 1)
       return { ...b, lane }
     })
-    const maxLane = blocks.reduce((m, b) => Math.max(m, b.lane), 0)
-    return { sector: s, blocks, lanes: maxLane + 1 }
+
+    return { sector: s, blocks, lanes: Math.max(1, blocks.reduce((m, b) => Math.max(m, b.lane), 0) + 1) }
   }), [display])
 
+  const rowH   = (lanes: number) => ROW_PAD * 2 + lanes * LANE_H + Math.max(0, lanes - 1) * LANE_GAP
   const totalH = HEADER_H + sectorRows.reduce((s, r) => s + rowH(r.lanes), 0)
-
-  const STATUS_COLORS: Record<string, string> = {
-    Planning:      '#d1d5db',
-    'In Progress': '#60a5fa',
-    Published:     '#34d399',
-    Completed:     '#a78bfa',
-  }
 
   return (
     <div className="w-full select-none">
-      {/* Legend */}
-      <div className="flex items-center gap-4 flex-wrap mb-4">
-        {ETYPES.map(e => (
-          <div key={e.key} className="flex items-center gap-1.5 text-xs text-gray-600">
-            <span className="inline-block w-3 h-3 rounded-sm border" style={{ background: e.bg, borderColor: e.border }} />
-            {e.label}
+      {/* Legend — grouped by phase */}
+      <div className="flex items-start gap-x-5 gap-y-2 flex-wrap mb-4">
+        {WORKFLOW_EVENTS.filter((e, i, a) => a.findIndex(x => x.key === e.key) === i).map(ev => (
+          <div key={ev.key} className="flex items-center gap-1.5 text-xs text-gray-600">
+            <span className="inline-block w-3 h-3 rounded-sm border flex-shrink-0" style={{ background: ev.bg, borderColor: ev.border }} />
+            <span className="whitespace-nowrap">{ev.wfSteps} {ev.label}</span>
           </div>
         ))}
         <div className="flex items-center gap-1.5 text-xs text-gray-600">
-          <span className="inline-block w-0.5 h-3 bg-red-400" /> Today
+          <span className="inline-block w-0.5 h-3 bg-red-400 flex-shrink-0" />Today
         </div>
       </div>
 
@@ -124,9 +118,10 @@ export function SectorGrid({ sectors }: { sectors: Sector[] }) {
       <div className="flex items-center gap-2 mb-3 flex-wrap">
         <button onClick={() => setViewStart(d => addDays(d, -7))} className="p-1 rounded hover:bg-gray-100 text-gray-500"><ChevronLeft className="size-4" /></button>
         <button onClick={() => setViewStart(d => addDays(d,  7))} className="p-1 rounded hover:bg-gray-100 text-gray-500"><ChevronRight className="size-4" /></button>
-        <button onClick={() => setViewStart(addDays(today, -7))} className="px-2.5 py-1 text-xs rounded-md bg-gray-100 hover:bg-gray-200 text-gray-600 font-medium">Today</button>
+        <button onClick={() => setViewStart(addDays(today, -14))} className="px-2.5 py-1 text-xs rounded-md bg-gray-100 hover:bg-gray-200 text-gray-600 font-medium">Today</button>
         <span className="text-xs text-gray-400">
-          {viewStart.toLocaleDateString('en-US',{ month:'short', day:'numeric', timeZone:'UTC' })} – {viewEnd.toLocaleDateString('en-US',{ month:'short', day:'numeric', year:'numeric', timeZone:'UTC' })}
+          {viewStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })} –{' '}
+          {viewEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}
         </span>
         <div className="ml-auto flex items-center gap-1 text-xs">
           <button onClick={() => setShowAll(false)} className={`px-2.5 py-1 rounded-md font-medium ${!showAll ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
@@ -138,57 +133,43 @@ export function SectorGrid({ sectors }: { sectors: Sector[] }) {
         </div>
       </div>
 
-      {/* Grid: sticky label col + scrollable chart */}
+      {/* Grid */}
       <div className="rounded-xl border border-gray-200 bg-white overflow-hidden" style={{ display: 'flex' }}>
 
-        {/* ── sticky sector label column ─────────────────────────────────── */}
-        <div
-          className="shrink-0 bg-white border-r border-gray-200 z-20"
-          style={{ width: LABEL_W, position: 'sticky', left: 0 }}
-        >
-          {/* header */}
+        {/* Sticky label column */}
+        <div style={{ width: LABEL_W, minWidth: LABEL_W, position: 'sticky', left: 0, zIndex: 20 }}
+          className="shrink-0 border-r border-gray-200 bg-white">
           <div style={{ height: HEADER_H }} className="bg-gray-50 border-b border-gray-200 flex items-end px-3 pb-2">
             <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Sector</span>
           </div>
-
           {sectorRows.map(({ sector: s, lanes }) => (
-            <div
-              key={s.id}
-              style={{ height: rowH(lanes) }}
+            <div key={s.id} style={{ height: rowH(lanes) }}
               className="flex flex-col justify-center px-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
-              onClick={() => window.location.href = `/roadmap/sectors/${s.id}`}
-            >
+              onClick={() => window.location.href = `/roadmap/sectors/${s.id}`}>
               <div className="flex items-center gap-1.5">
-                <span
-                  className="w-2 h-2 rounded-full shrink-0"
-                  style={{ background: STATUS_COLORS[s.status] ?? '#d1d5db' }}
-                />
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: STATUS_DOT[s.status] ?? '#d1d5db' }} />
                 <span className="text-[12px] font-semibold text-gray-800 truncate leading-tight">{s.name}</span>
               </div>
               <div className="text-[10px] text-gray-400 pl-3.5 mt-0.5">
                 {s.publishDate
-                  ? utcDate(s.publishDate).toLocaleDateString('en-US',{ month:'short', day:'numeric', timeZone:'UTC' })
-                  : <span className="italic">no date</span>
-                }
+                  ? utcDate(s.publishDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+                  : <span className="italic">no date set</span>}
               </div>
             </div>
           ))}
-
-          {/* total footer */}
           <div style={{ height: 36 }} className="flex items-center px-3 bg-gray-50 border-t border-gray-200">
             <span className="text-xs font-bold text-gray-600">{display.length} sectors</span>
           </div>
         </div>
 
-        {/* ── scrollable chart ────────────────────────────────────────────── */}
+        {/* Scrollable chart */}
         <div style={{ flex: 1, overflowX: 'auto' }}>
           <svg width={chartW} height={totalH + 36} style={{ display: 'block', minWidth: chartW }}>
-
             {/* Month band */}
             <rect x={0} y={0} width={chartW} height={24} fill="#f9fafb" />
             {monthSpans.map((m, i) => (
               <g key={i}>
-                <text x={m.x + 6} y={16} fontSize={10} fontWeight="700" fill="#6b7280">{m.label}</text>
+                <text x={m.x + 4} y={16} fontSize={10} fontWeight="700" fill="#6b7280">{m.label}</text>
                 {i > 0 && <line x1={m.x} y1={0} x2={m.x} y2={24} stroke="#e5e7eb" />}
               </g>
             ))}
@@ -196,33 +177,31 @@ export function SectorGrid({ sectors }: { sectors: Sector[] }) {
             {/* Day headers */}
             <rect x={0} y={24} width={chartW} height={HEADER_H - 24} fill="#f9fafb" />
             {days.map((d, i) => {
-              const isToday  = i === todayOff
-              const isSun    = d.getUTCDay() === 0
-              const isSat    = d.getUTCDay() === 6
+              const isToday = i === todayOff
+              const isSun = d.getUTCDay() === 0; const isSat = d.getUTCDay() === 6
               return (
                 <g key={i}>
-                  <rect
-                    x={i * DAY_W} y={24} width={DAY_W} height={HEADER_H - 24}
-                    fill={isToday ? '#eef2ff' : isSat || isSun ? '#f9fafb' : 'transparent'}
-                  />
-                  <text x={i * DAY_W + DAY_W / 2} y={36} fontSize={9} fill={isSat || isSun ? '#d1d5db' : '#9ca3af'} textAnchor="middle" fontWeight="600">{fmtDay(d)}</text>
-                  <text x={i * DAY_W + DAY_W / 2} y={49} fontSize={11} fill={isToday ? '#4f46e5' : isSat || isSun ? '#d1d5db' : '#374151'} textAnchor="middle" fontWeight={isToday ? '800' : '500'}>{fmtNum(d)}</text>
+                  <rect x={i * DAY_W} y={24} width={DAY_W} height={HEADER_H - 24}
+                    fill={isToday ? '#eef2ff' : isSat || isSun ? '#f9fafb' : 'transparent'} />
+                  <text x={i * DAY_W + DAY_W / 2} y={36} fontSize={8} fill={isSat || isSun ? '#d1d5db' : '#9ca3af'} textAnchor="middle" fontWeight="600">{fmtDay(d)}</text>
+                  <text x={i * DAY_W + DAY_W / 2} y={49} fontSize={10}
+                    fill={isToday ? '#4f46e5' : isSat || isSun ? '#d1d5db' : '#374151'}
+                    textAnchor="middle" fontWeight={isToday ? '800' : '400'}>{fmtNum(d)}</text>
                   <line x1={i * DAY_W} y1={24} x2={i * DAY_W} y2={HEADER_H} stroke="#f3f4f6" />
                 </g>
               )
             })}
             <line x1={0} y1={HEADER_H} x2={chartW} y2={HEADER_H} stroke="#e5e7eb" />
 
-            {/* Sector rows */}
+            {/* Rows */}
             {(() => {
               let yOff = HEADER_H
               return sectorRows.map(({ sector: s, blocks, lanes }) => {
-                const rh  = rowH(lanes)
-                const el  = (
+                const rh = rowH(lanes)
+                const el = (
                   <g key={s.id}>
                     {days.map((d, i) => {
-                      const isSat = d.getUTCDay() === 6
-                      const isSun = d.getUTCDay() === 0
+                      const isSat = d.getUTCDay() === 6; const isSun = d.getUTCDay() === 0
                       return (
                         <g key={i}>
                           {(isSat || isSun) && <rect x={i * DAY_W} y={yOff} width={DAY_W} height={rh} fill="#fafafa" />}
@@ -230,51 +209,34 @@ export function SectorGrid({ sectors }: { sectors: Sector[] }) {
                         </g>
                       )
                     })}
-
-                    {/* today column */}
                     {todayOff >= 0 && todayOff < DAYS_SHOWN && (
                       <rect x={todayOff * DAY_W} y={yOff} width={DAY_W} height={rh} fill="#eef2ff" opacity={0.4} />
                     )}
-
-                    {/* event blocks */}
+                    {!s.publishDate && (
+                      <text x={8} y={yOff + rh / 2 + 4} fontSize={10} fill="#d1d5db" fontStyle="italic">no publish date — click to set</text>
+                    )}
                     {blocks.map((b, bi) => {
                       const bs = daysBetween(viewStart, b.start)
                       const be = daysBetween(viewStart, b.end)
-                      const cs = Math.max(0, bs)
-                      const ce = Math.min(DAYS_SHOWN - 1, be)
+                      const cs = Math.max(0, bs); const ce = Math.min(DAYS_SHOWN - 1, be)
                       if (cs > ce) return null
-                      const bx  = cs * DAY_W + 2
-                      const bw  = Math.max((ce - cs + 1) * DAY_W - 4, 6)
-                      const by  = yOff + ROW_PAD + b.lane * (LANE_H + LANE_GAP)
+                      const bx = cs * DAY_W + 1; const bw = Math.max((ce - cs + 1) * DAY_W - 2, 4)
+                      const by = yOff + ROW_PAD + b.lane * (LANE_H + LANE_GAP)
                       return (
                         <g key={bi}>
-                          <rect x={bx} y={by} width={bw} height={LANE_H} rx={3}
-                            fill={b.bg} stroke={b.border} strokeWidth={1} opacity={0.92}
-                          />
-                          {bs < 0 && (
-                            <polygon points={`${bx},${by} ${bx+7},${by+LANE_H/2} ${bx},${by+LANE_H}`} fill={b.border} opacity={0.6} />
-                          )}
-                          {be >= DAYS_SHOWN && (
-                            <polygon points={`${bx+bw},${by} ${bx+bw-7},${by+LANE_H/2} ${bx+bw},${by+LANE_H}`} fill={b.border} opacity={0.6} />
-                          )}
-                          {bw > 16 && (
-                            <text x={bx + (bs < 0 ? 10 : 5)} y={by + LANE_H / 2 + 4}
-                              fontSize={9} fill={b.text} fontWeight="600"
-                              style={{ pointerEvents: 'none', userSelect: 'none' }}
-                            >
-                              {bw > 70 ? b.label : bw > 30 ? b.label.split(' ')[0] : ''}
+                          <rect x={bx} y={by} width={bw} height={LANE_H} rx={2} fill={b.bg} stroke={b.border} strokeWidth={1} opacity={0.92} />
+                          {bs < 0 && <polygon points={`${bx},${by} ${bx+6},${by+LANE_H/2} ${bx},${by+LANE_H}`} fill={b.border} opacity={0.6} />}
+                          {be >= DAYS_SHOWN && <polygon points={`${bx+bw},${by} ${bx+bw-6},${by+LANE_H/2} ${bx+bw},${by+LANE_H}`} fill={b.border} opacity={0.6} />}
+                          {bw > 20 && (
+                            <text x={bx + (bs < 0 ? 9 : 4)} y={by + LANE_H / 2 + 4} fontSize={8} fill={b.text} fontWeight="600"
+                              style={{ pointerEvents: 'none', userSelect: 'none' }}>
+                              {bw > 80 ? b.label : bw > 35 ? b.label.split(' ')[0] : ''}
                             </text>
                           )}
-                          <title>{`${s.name}: ${b.label}\n${b.start.toISOString().split('T')[0]} → ${b.end.toISOString().split('T')[0]}`}</title>
+                          <title>{`${s.name} — ${b.label} (${b.wfSteps})\n${b.start.toISOString().split('T')[0]} → ${b.end.toISOString().split('T')[0]}\nOwner: ${b.owner}`}</title>
                         </g>
                       )
                     })}
-
-                    {/* no-date placeholder */}
-                    {!s.publishDate && (
-                      <text x={8} y={yOff + rh / 2 + 4} fontSize={10} fill="#d1d5db" fontStyle="italic">no publish date — click row to set</text>
-                    )}
-
                     <line x1={0} y1={yOff + rh} x2={chartW} y2={yOff + rh} stroke="#f3f4f6" />
                   </g>
                 )
@@ -285,11 +247,8 @@ export function SectorGrid({ sectors }: { sectors: Sector[] }) {
 
             {/* Today line */}
             {todayOff >= 0 && todayOff < DAYS_SHOWN && (
-              <line
-                x1={todayOff * DAY_W + DAY_W / 2} y1={0}
-                x2={todayOff * DAY_W + DAY_W / 2} y2={totalH}
-                stroke="#f87171" strokeWidth={1.5} strokeDasharray="4,3"
-              />
+              <line x1={todayOff * DAY_W + DAY_W / 2} y1={0} x2={todayOff * DAY_W + DAY_W / 2} y2={totalH}
+                stroke="#f87171" strokeWidth={1.5} strokeDasharray="4,3" />
             )}
 
             {/* Footer */}
