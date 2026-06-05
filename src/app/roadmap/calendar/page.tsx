@@ -63,8 +63,9 @@ export default function CalendarPage() {
     if (mp       && s.mp       !== mp)       return false
     if (bd       && s.bd       !== bd)       return false
     if (schedOnly && !s.publishDate)         return false
-    if (dateFrom && s.publishDate && s.publishDate < dateFrom) return false
-    if (dateTo   && s.publishDate && s.publishDate > dateTo)   return false
+    // When a date range is active, sectors with no publish date are excluded
+    if (dateFrom && (!s.publishDate || s.publishDate < dateFrom)) return false
+    if (dateTo   && (!s.publishDate || s.publishDate > dateTo))   return false
     return true
   }), [data.sectors, search, status, priority, mp, bd, schedOnly, dateFrom, dateTo])
 

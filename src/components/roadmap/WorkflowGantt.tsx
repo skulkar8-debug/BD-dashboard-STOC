@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useCallback } from 'react'
+import { useMemo, useState, useCallback, useEffect } from 'react'
 import { ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRt } from 'lucide-react'
 import type { Sector } from '@/lib/types'
 import { WORKFLOW_EVENTS } from '@/lib/workflowEvents'
@@ -50,10 +50,23 @@ export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
   const expandAll   = () => setExpanded(new Set(sectors.map(s => s.id)))
   const collapseAll = () => setExpanded(new Set())
 
-  const [viewStart, setViewStart] = useState<Date>(() => {
-    const sched = sectors.filter(s => !!s.publishDate)
-    return sched.length ? addDays(utcDate(sched[0].publishDate), -38) : addDays(today, -14)
-  })
+  const firstScheduled = useMemo(
+    () => [...sectors].filter(s => !!s.publishDate).sort((a, b) => a.publishDate.localeCompare(b.publishDate))[0],
+    [sectors]
+  )
+
+  const [viewStart, setViewStart] = useState<Date>(() =>
+    firstScheduled ? addDays(utcDate(firstScheduled.publishDate), -20) : addDays(today, -14)
+  )
+
+  // Auto-navigate when filtered sectors change (e.g. date range filter applied)
+  useEffect(() => {
+    if (firstScheduled) {
+      setViewStart(addDays(utcDate(firstScheduled.publishDate), -20))
+    } else {
+      setViewStart(addDays(today, -14))
+    }
+  }, [firstScheduled?.publishDate])
 
   const viewEnd  = addDays(viewStart, DAYS_SHOWN - 1)
   const chartW   = DAYS_SHOWN * DAY_W
