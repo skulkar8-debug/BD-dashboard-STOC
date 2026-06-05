@@ -66,7 +66,7 @@ function AddSectorModal({ people, onSave, onClose }: { people: Sector['mp'][], o
 }
 
 // ── Main page ──────────────────────────────────────────────────────────────────
-type EditCell = { id: string; field: 'status' | 'priority' | 'publishDate' | 'mp' | 'bd' }
+type EditCell = { id: string; field: 'status' | 'priority' | 'publishDate' | 'mp' | 'bd' | 'sm' }
 
 export default function SectorsPage() {
   const { data, addSector, updateSector } = useStore()
@@ -214,7 +214,9 @@ export default function SectorsPage() {
               <th className="text-left px-3 py-2.5 font-semibold text-gray-600 text-xs">
                 BD <span className="text-indigo-400">✎</span>
               </th>
-              <th className="text-left px-3 py-2.5 font-semibold text-gray-600 text-xs">SM</th>
+              <th className="text-left px-3 py-2.5 font-semibold text-gray-600 text-xs">
+                SM <span className="text-indigo-400">✎</span>
+              </th>
               <th className="text-left px-3 py-2.5 font-semibold text-gray-600 text-xs">MR</th>
               <th className="text-left px-3 py-2.5 font-semibold text-gray-600 text-xs">Links</th>
             </tr>
@@ -309,7 +311,20 @@ export default function SectorsPage() {
                   }
                 </td>
 
-                <td className="px-3 py-2 text-gray-500 text-xs">{s.sm}</td>
+                {/* SM — inline edit */}
+                <td className="px-3 py-2" onClick={e => startEdit(e, s.id, 'sm')}>
+                  {isEditing(s.id, 'sm')
+                    ? <InlineSelect
+                        value={s.sm as SectorStatus} options={sms as SectorStatus[]}
+                        onSave={v => saveField(s.id, 'sm', v)}
+                        onCancel={() => setEditing(null)}
+                      />
+                    : <span className="group flex items-center gap-1 text-gray-700">
+                        {s.sm || <span className="text-gray-300 italic text-xs">—</span>}
+                        <ChevronDown className="size-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </span>
+                  }
+                </td>
                 <td className="px-3 py-2 text-gray-500 text-xs">{s.mr}</td>
 
                 {/* Links */}
