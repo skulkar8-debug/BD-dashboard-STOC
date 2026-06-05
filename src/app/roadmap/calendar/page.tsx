@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Building2, Users, CalendarDays, List } from 'lucide-react'
 import { useStore, fmtDate } from '@/lib/store'
+import { WorkflowGantt }    from '@/components/roadmap/WorkflowGantt'
 // Inline badge using workflow event colors
 function EventBadge({ type }: { type: string }) {
   const ev = WORKFLOW_EVENTS.find(e => e.label === type)
@@ -16,7 +17,7 @@ function EventBadge({ type }: { type: string }) {
     </span>
   )
 }
-import { SectorGrid }        from '@/components/roadmap/SectorGrid'
+import { SectorGrid }        from '@/components/roadmap/SectorGrid'   // kept for reference
 import { ResourceGrid }      from '@/components/roadmap/ResourceGrid'
 import { CalendarMonthView } from '@/components/roadmap/CalendarMonthView'
 import { WORKFLOW_EVENTS } from '@/lib/workflowEvents'
@@ -79,7 +80,7 @@ export default function CalendarPage() {
         </div>
       </div>
 
-      {view === 'sector' && <SectorGrid sectors={data.sectors} />}
+      {view === 'sector' && <WorkflowGantt sectors={data.sectors} />}
       {view === 'people' && <ResourceGrid sectors={data.sectors} />}
 
       {view === 'month' && (
