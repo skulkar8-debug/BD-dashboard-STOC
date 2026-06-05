@@ -50,10 +50,8 @@ export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
     [sectors]
   )
 
-  // Default: scheduled sectors are pre-expanded, others collapsed
-  const [expanded, setExpanded] = useState<Set<string>>(
-    () => new Set(sectors.filter(s => !!s.publishDate).map(s => s.id))
-  )
+  // All sectors collapsed by default
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
 
   const toggleSector = useCallback((id: string) => {
     setExpanded(prev => {
@@ -65,6 +63,27 @@ export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
 
   const expandAll   = () => setExpanded(new Set(sectors.map(s => s.id)))
   const collapseAll = () => setExpanded(new Set())
+
+  // ── Filters ───────────────────────────────────────────────────────────────
+  const [filterStatus,   setFilterStatus]   = useState('')
+  const [filterPriority, setFilterPriority] = useState('')
+  const [filterMP,       setFilterMP]       = useState('')
+  const [filterBD,       setFilterBD]       = useState('')
+  const [filterScheduled, setFilterScheduled] = useState(false)
+
+  const allMPs = useMemo(() => [...new Set(sectors.map(s => s.mp).filter(Boolean))].sort(), [sectors])
+  const allBDs = useMemo(() => [...new Set(sectors.map(s => s.bd).filter(Boolean))].sort(), [sectors])
+
+  const filtered = useMemo(() => sectors.filter(s => {
+    if (filterStatus   && s.status   !== filterStatus)   return false
+    if (filterPriority && s.priority !== filterPriority) return false
+    if (filterMP       && s.mp       !== filterMP)       return false
+    if (filterBD       && s.bd       !== filterBD)       return false
+    if (filterScheduled && !s.publishDate)               return false
+    return true
+  }), [sectors, filterStatus, filterPriority, filterMP, filterBD, filterScheduled])
+
+  const hasFilters = !!(filterStatus || filterPriority || filterMP || filterBD || filterScheduled)
 
   const [viewStart, setViewStart] = useState<Date>(() =>
     scheduled.length ? addDays(utcDate(scheduled[0].publishDate), -38) : addDays(today, -14)
@@ -96,7 +115,7 @@ export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
 
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = []
-    sectors.forEach(s => {
+    filtered.forEach(s => {
       out.push({ kind: 'sector', sector: s })
       if (expanded.has(s.id)) {
         EVENTS_BY_PHASE.forEach(({ phase, events }) => {
@@ -114,7 +133,41 @@ export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
   return (
     <div className="w-full select-none">
 
-      {/* Controls */}
+      {/* ── Filters ─────────────────────────────────────────────────────────── */}
+      <div className="flex gap-2 mb-3 flex-wrap items-center">
+        <select className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300"
+          value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+          <option value="">All Statuses</option>
+          {['Planning','In Progress','Published','Completed'].map(s => <option key={s}>{s}</option>)}
+        </select>
+        <select className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300"
+          value={filterPriority} onChange={e => setFilterPriority(e.target.value)}>
+          <option value="">All Priorities</option>
+          {['High','Medium','Low'].map(p => <option key={p}>{p}</option>)}
+        </select>
+        <select className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300"
+          value={filterMP} onChange={e => setFilterMP(e.target.value)}>
+          <option value="">All MPs</option>
+          {allMPs.map(m => <option key={m}>{m}</option>)}
+        </select>
+        <select className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300"
+          value={filterBD} onChange={e => setFilterBD(e.target.value)}>
+          <option value="">All BD</option>
+          {allBDs.map(b => <option key={b}>{b}</option>)}
+        </select>
+        <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer select-none">
+          <input type="checkbox" className="rounded" checked={filterScheduled}
+            onChange={e => setFilterScheduled(e.target.checked)} />
+          Scheduled only
+        </label>
+        {hasFilters && (
+          <button onClick={() => { setFilterStatus(''); setFilterPriority(''); setFilterMP(''); setFilterBD(''); setFilterScheduled(false) }}
+            className="text-xs text-indigo-600 hover:underline ml-1">Clear filters</button>
+        )}
+        <span className="text-xs text-gray-400 ml-auto">{filtered.length} of {sectors.length} sectors</span>
+      </div>
+
+      {/* ── Timeline nav + expand controls ──────────────────────────────────── */}
       <div className="flex items-center gap-2 mb-3 flex-wrap">
         <button onClick={() => setViewStart(d => addDays(d, -7))} className="p-1 rounded hover:bg-gray-100 text-gray-500"><ChevronLeft className="size-4" /></button>
         <button onClick={() => setViewStart(d => addDays(d,  7))} className="p-1 rounded hover:bg-gray-100 text-gray-500"><ChevronRight className="size-4" /></button>
@@ -127,12 +180,10 @@ export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
           <button onClick={expandAll}   className="text-indigo-600 hover:underline">Expand all</button>
           <span className="text-gray-300">|</span>
           <button onClick={collapseAll} className="text-gray-500 hover:underline">Collapse all</button>
-          <span className="text-gray-300">|</span>
-          <span className="text-gray-400">{sectors.length} sectors · {scheduled.length} scheduled</span>
         </div>
       </div>
 
-      {/* Phase legend */}
+      {/* ── Phase legend ──────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-4 flex-wrap mb-4">
         {Object.entries(PHASE_BAR).map(([phase, c]) => (
           <div key={phase} className="flex items-center gap-1.5 text-xs text-gray-600">
@@ -219,7 +270,7 @@ export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
           {/* Footer */}
           <div style={{ height: 32 }} className="bg-gray-50 border-t border-gray-200 flex items-center px-3">
             <span className="text-xs font-bold text-gray-600">
-              {expanded.size} expanded · {sectors.length - expanded.size} collapsed
+              {filtered.length} sectors · {expanded.size} expanded
             </span>
           </div>
         </div>
