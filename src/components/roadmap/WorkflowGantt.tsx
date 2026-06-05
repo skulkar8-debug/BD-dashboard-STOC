@@ -6,15 +6,25 @@ import type { Sector } from '@/lib/types'
 import { WORKFLOW_EVENTS } from '@/lib/workflowEvents'
 
 // ─── layout ───────────────────────────────────────────────────────────────────
-const SECTOR_W  = 130   // sector name column (sticky)
-const PHASE_W   = 86    // phase label column (sticky)
-const STEP_W    = 138   // step name column (sticky)
-const LABEL_W   = SECTOR_W + PHASE_W + STEP_W  // 354px total sticky
-const DAY_W     = 38
-const SECTOR_H  = 32    // collapsed header row height
-const STEP_H    = 26    // expanded step row height
-const HEADER_H  = 48
-const DAYS_SHOWN = 56
+const SECTOR_W    = 130
+const PHASE_W     = 86
+const STEP_W      = 138
+const LABEL_W     = SECTOR_W + PHASE_W + STEP_W   // 354px sticky
+const DAY_W       = 38
+const HEADER_H    = 48
+const DAYS_SHOWN  = 56
+
+// Collapsed row: shows all bars as mini lanes
+const MINI_LANE   = 5
+const MINI_GAP    = 2
+const MINI_PAD    = 6
+const MINI_LANES  = 5
+const ROW_COLLAPSED = MINI_PAD * 2 + MINI_LANES * MINI_LANE + (MINI_LANES - 1) * MINI_GAP  // 46px
+
+// When expanded, the sector header row is thinner (no bars, just label)
+const SECTOR_HDR  = 28
+// Each step sub-row
+const STEP_H      = 26
 
 const PHASE_BAR: Record<string, { fill: string; stroke: string; text: string }> = {
   'Research/Data': { fill: '#ddd6fe', stroke: '#7c3aed', text: '#4c1d95' },
@@ -34,17 +44,39 @@ const EVENTS_BY_PHASE = PHASES_ORDER.map(ph => ({
 }))
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
-function utcDate(s: string)    { return new Date(s + 'T00:00:00Z') }
+function utcDate(s: string) { return new Date(s + 'T00:00:00Z') }
 function addDays(d: Date, n: number) { const r = new Date(d); r.setUTCDate(r.getUTCDate() + n); return r }
 function daysBetween(a: Date, b: Date) { return Math.round((b.getTime() - a.getTime()) / 86_400_000) }
 function fmtDay(d: Date) { return d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }).slice(0, 1) }
 function fmtNum(d: Date) { return d.toLocaleDateString('en-US', { day: 'numeric', timeZone: 'UTC' }) }
 
+interface LanedBlock {
+  key: string; phase: string; label: string
+  start: Date; end: Date
+  fill: string; stroke: string; text: string
+  lane: number
+}
+
+function computeLanedBlocks(pub: Date): LanedBlock[] {
+  const ends: Date[] = []
+  return WORKFLOW_EVENTS
+    .map(ev => {
+      const c = PHASE_BAR[ev.phase] ?? PHASE_BAR['Report']
+      return { key: ev.key, phase: ev.phase, label: ev.label, start: addDays(pub, ev.sOff), end: addDays(pub, ev.eOff), fill: c.fill, stroke: c.stroke, text: c.text }
+    })
+    .sort((a, b) => a.start.getTime() - b.start.getTime())
+    .map(b => {
+      let lane = ends.findIndex(e => b.start >= e)
+      if (lane === -1) { lane = ends.length; ends.push(addDays(b.end, 1)) }
+      else ends[lane] = addDays(b.end, 1)
+      return { ...b, lane }
+    })
+}
+
 // ─── component ────────────────────────────────────────────────────────────────
 export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
   const today = new Date('2026-06-05T00:00:00Z')
 
-  // All collapsed by default
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const toggle      = useCallback((id: string) => setExpanded(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n }), [])
   const expandAll   = () => setExpanded(new Set(sectors.map(s => s.id)))
@@ -55,18 +87,22 @@ export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
     [sectors]
   )
 
-  const [viewStart, setViewStart] = useState<Date>(() =>
-    firstScheduled ? addDays(utcDate(firstScheduled.publishDate), -20) : addDays(today, -14)
-  )
+  // Default: show today-centered window
+  const [viewStart, setViewStart] = useState<Date>(() => addDays(today, -14))
 
-  // Auto-navigate when filtered sectors change (e.g. date range filter applied)
+  // When filtered sectors change, navigate to show the first upcoming sector
+  // (or fall back to today if all are in the past)
   useEffect(() => {
-    if (firstScheduled) {
-      setViewStart(addDays(utcDate(firstScheduled.publishDate), -20))
+    const upcoming = sectors
+      .filter(s => !!s.publishDate && new Date(s.publishDate + 'T00:00:00Z') >= today)
+      .sort((a, b) => a.publishDate.localeCompare(b.publishDate))[0]
+    if (upcoming) {
+      setViewStart(addDays(utcDate(upcoming.publishDate), -20))
     } else {
       setViewStart(addDays(today, -14))
     }
-  }, [firstScheduled?.publishDate])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sectors.map(s => s.id).join(',')])
 
   const viewEnd  = addDays(viewStart, DAYS_SHOWN - 1)
   const chartW   = DAYS_SHOWN * DAY_W
@@ -87,7 +123,16 @@ export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
     return out
   }, [days])
 
-  // Build flat rows for label column + SVG
+  // Precompute laned blocks for every sector
+  const blockMap = useMemo(() => {
+    const m = new Map<string, LanedBlock[]>()
+    sectors.forEach(s => {
+      m.set(s.id, s.publishDate ? computeLanedBlocks(utcDate(s.publishDate)) : [])
+    })
+    return m
+  }, [sectors])
+
+  // Row list for the label column + SVG
   type SectorRow = { kind: 'sector'; sector: Sector }
   type StepRow   = { kind: 'step';   sector: Sector; phase: string; evKey: string; label: string; sOff: number; eOff: number }
   type Row = SectorRow | StepRow
@@ -107,12 +152,39 @@ export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
     return out
   }, [sectors, expanded])
 
-  const totalH = HEADER_H + rows.reduce((h, r) => h + (r.kind === 'sector' ? SECTOR_H : STEP_H), 0)
+  const totalH = HEADER_H + rows.reduce((h, r) => {
+    if (r.kind === 'step') return h + STEP_H
+    return h + (expanded.has(r.sector.id) ? SECTOR_HDR : ROW_COLLAPSED)
+  }, 0)
+
+  // Helper: render mini bars inside a collapsed sector row
+  function renderMiniBars(s: Sector, yOff: number) {
+    const blocks = blockMap.get(s.id) ?? []
+    if (!blocks.length) return null
+    return blocks.filter(b => b.lane < MINI_LANES).map((b, bi) => {
+      const sd = daysBetween(viewStart, b.start)
+      const ed = daysBetween(viewStart, b.end)
+      const cs = Math.max(0, sd); const ce = Math.min(DAYS_SHOWN - 1, ed)
+      if (cs > ce) return null
+      const bx = cs * DAY_W + 1
+      const bw = Math.max((ce - cs + 1) * DAY_W - 2, 3)
+      const by = yOff + MINI_PAD + b.lane * (MINI_LANE + MINI_GAP)
+      return (
+        <g key={bi}>
+          <rect x={bx} y={by} width={bw} height={MINI_LANE} rx={1}
+            fill={b.fill} stroke={b.stroke} strokeWidth={0.5} opacity={0.9} />
+          {sd < 0 && <polygon points={`${bx},${by} ${bx+4},${by+MINI_LANE/2} ${bx},${by+MINI_LANE}`} fill={b.stroke} opacity={0.5} />}
+          {ed >= DAYS_SHOWN && <polygon points={`${bx+bw},${by} ${bx+bw-4},${by+MINI_LANE/2} ${bx+bw},${by+MINI_LANE}`} fill={b.stroke} opacity={0.5} />}
+          <title>{`${s.name} — ${b.label}\n${b.start.toISOString().split('T')[0]} → ${b.end.toISOString().split('T')[0]}`}</title>
+        </g>
+      )
+    })
+  }
 
   return (
     <div className="w-full select-none">
 
-      {/* Timeline nav + expand controls */}
+      {/* Controls */}
       <div className="flex items-center gap-2 mb-3 flex-wrap">
         <button onClick={() => setViewStart(d => addDays(d, -7))} className="p-1 rounded hover:bg-gray-100 text-gray-500"><ChevronLeft className="size-4" /></button>
         <button onClick={() => setViewStart(d => addDays(d,  7))} className="p-1 rounded hover:bg-gray-100 text-gray-500"><ChevronRight className="size-4" /></button>
@@ -130,7 +202,7 @@ export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
         </div>
       </div>
 
-      {/* Phase legend */}
+      {/* Legend */}
       <div className="flex items-center gap-4 flex-wrap mb-4">
         {Object.entries(PHASE_BAR).map(([ph, c]) => (
           <div key={ph} className="flex items-center gap-1.5 text-xs text-gray-600">
@@ -144,7 +216,7 @@ export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
       {/* Grid */}
       <div className="rounded-xl border border-gray-200 bg-white overflow-hidden" style={{ display: 'flex' }}>
 
-        {/* ── Sticky 3-column label area ────────────────────────────────────── */}
+        {/* Sticky label columns */}
         <div style={{ width: LABEL_W, minWidth: LABEL_W, position: 'sticky', left: 0, zIndex: 20 }}
           className="shrink-0 bg-white border-r border-gray-200">
 
@@ -156,32 +228,38 @@ export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
           </div>
 
           {/* Rows */}
-          {rows.map((row, i) => {
+          {rows.map(row => {
             if (row.kind === 'sector') {
               const s    = row.sector
               const isExp = expanded.has(s.id)
+              const rh   = isExp ? SECTOR_HDR : ROW_COLLAPSED
               return (
-                <div key={`lbl-s-${s.id}`} style={{ height: SECTOR_H }}
+                <div key={`lbl-s-${s.id}`} style={{ height: rh }}
                   className="flex items-center bg-gray-50 border-b border-gray-200 cursor-pointer hover:bg-indigo-50 transition-colors"
                   onClick={() => toggle(s.id)}>
                   {/* Sector col */}
-                  <div style={{ width: SECTOR_W }} className="flex items-center gap-1.5 px-2 min-w-0">
+                  <div style={{ width: SECTOR_W }} className="flex items-center gap-1.5 px-2 min-w-0 h-full">
                     {isExp
                       ? <ChevronDown className="size-3 text-indigo-500 shrink-0" />
                       : <ChevronRt   className="size-3 text-gray-400 shrink-0" />
                     }
                     <span className="w-2 h-2 rounded-full shrink-0" style={{ background: STATUS_DOT[s.status] ?? '#d1d5db' }} />
-                    <span className="text-[11px] font-bold text-gray-800 truncate">{s.name}</span>
+                    <div className="min-w-0">
+                      <div className="text-[11px] font-bold text-gray-800 truncate leading-tight">{s.name}</div>
+                      <div className={`text-[9px] truncate ${s.publishDate ? 'text-gray-400' : 'text-gray-300 italic'}`}>
+                        {s.publishDate
+                          ? utcDate(s.publishDate).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric', timeZone:'UTC' })
+                          : 'no publish date'}
+                      </div>
+                    </div>
                   </div>
-                  {/* Phase + Step col combined: show date or "no date" */}
-                  <div style={{ width: PHASE_W + STEP_W }} className="flex items-center px-2 border-l border-gray-200 min-w-0 gap-2">
-                    <span className={`text-[10px] truncate ${s.publishDate ? 'text-gray-500' : 'text-gray-300 italic'}`}>
-                      {s.publishDate
-                        ? utcDate(s.publishDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
-                        : 'no publish date'}
-                    </span>
+                  {/* Phase + Step cols: hint when collapsed */}
+                  <div style={{ width: PHASE_W + STEP_W }} className="flex items-center px-2 border-l border-gray-200 h-full min-w-0">
                     {!isExp && s.publishDate && (
-                      <span className="ml-auto text-[9px] text-indigo-400 shrink-0 whitespace-nowrap">click to expand</span>
+                      <span className="text-[9px] text-indigo-300 italic">↓ expand for details</span>
+                    )}
+                    {!isExp && !s.publishDate && (
+                      <span className="text-[9px] text-gray-300 italic">no date set</span>
                     )}
                   </div>
                 </div>
@@ -193,16 +271,13 @@ export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
             return (
               <div key={`lbl-t-${row.sector.id}-${row.evKey}`} style={{ height: STEP_H }}
                 className="flex items-center border-b border-gray-100">
-                {/* Sector col: blank */}
                 <div style={{ width: SECTOR_W }} className="border-r border-gray-100 h-full shrink-0" />
-                {/* Phase col */}
                 <div style={{ width: PHASE_W, borderLeftColor: ph.stroke }}
                   className="h-full flex items-center px-2 border-l-2 border-r border-gray-100 shrink-0">
                   <span className="text-[9px] font-bold uppercase tracking-wide truncate" style={{ color: ph.stroke }}>
                     {row.phase}
                   </span>
                 </div>
-                {/* Step col */}
                 <div style={{ width: STEP_W }} className="h-full flex items-center px-2 border-l border-gray-100 min-w-0">
                   <span className="text-[11px] text-gray-700 truncate">{row.label}</span>
                 </div>
@@ -210,13 +285,12 @@ export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
             )
           })}
 
-          {/* Footer */}
           <div style={{ height: 32 }} className="bg-gray-50 border-t border-gray-200 flex items-center px-3">
             <span className="text-xs font-bold text-gray-600">{sectors.length} sectors · {expanded.size} expanded</span>
           </div>
         </div>
 
-        {/* ── Scrollable SVG chart ──────────────────────────────────────────── */}
+        {/* Scrollable SVG */}
         <div style={{ flex: 1, overflowX: 'auto' }}>
           <svg width={chartW} height={totalH + 32} style={{ display: 'block', minWidth: chartW }}>
 
@@ -253,24 +327,41 @@ export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
             {(() => {
               let yOff = HEADER_H
               return rows.map(row => {
-                const rh = row.kind === 'sector' ? SECTOR_H : STEP_H
+                const isExp = row.kind === 'sector' ? expanded.has(row.sector.id) : false
+                const rh    = row.kind === 'sector'
+                  ? (isExp ? SECTOR_HDR : ROW_COLLAPSED)
+                  : STEP_H
 
                 if (row.kind === 'sector') {
+                  const s = row.sector
                   const el = (
-                    <g key={`svg-s-${row.sector.id}`} style={{ cursor: 'pointer' }}
-                      onClick={() => toggle(row.sector.id)}>
-                      <rect x={0} y={yOff} width={chartW} height={rh} fill="#f9fafb" />
-                      {days.map((_, i) => (
-                        <line key={i} x1={i * DAY_W} y1={yOff} x2={i * DAY_W} y2={yOff + rh} stroke="#e5e7eb" strokeWidth={0.5} />
-                      ))}
-                      <line x1={0} y1={yOff + rh} x2={chartW} y2={yOff + rh} stroke="#e5e7eb" />
+                    <g key={`svg-s-${s.id}`} style={{ cursor: 'pointer' }} onClick={() => toggle(s.id)}>
+                      {/* Background */}
+                      <rect x={0} y={yOff} width={chartW} height={rh} fill={isExp ? '#f9fafb' : '#ffffff'} />
+                      {/* Grid lines */}
+                      {days.map((d, i) => {
+                        const we = d.getUTCDay() === 0 || d.getUTCDay() === 6
+                        return (
+                          <g key={i}>
+                            {we && <rect x={i * DAY_W} y={yOff} width={DAY_W} height={rh} fill={isExp ? '#f3f4f6' : '#fafafa'} />}
+                            <line x1={i * DAY_W} y1={yOff} x2={i * DAY_W} y2={yOff + rh} stroke="#f3f4f6" />
+                          </g>
+                        )
+                      })}
+                      {/* Today column */}
+                      {todayOff >= 0 && todayOff < DAYS_SHOWN && (
+                        <rect x={todayOff * DAY_W} y={yOff} width={DAY_W} height={rh} fill="#eef2ff" opacity={0.35} />
+                      )}
+                      {/* Mini bars when COLLAPSED */}
+                      {!isExp && renderMiniBars(s, yOff)}
+                      <line x1={0} y1={yOff + rh} x2={chartW} y2={yOff + rh} stroke="#e5e7eb" strokeWidth={0.5} />
                     </g>
                   )
                   yOff += rh; return el
                 }
 
-                // Step row
-                const s = row.sector
+                // Step row — shows full bar
+                const s   = row.sector
                 const pub = s.publishDate ? utcDate(s.publishDate) : null
                 const ph  = PHASE_BAR[row.phase] ?? PHASE_BAR['Report']
 
@@ -280,17 +371,14 @@ export function WorkflowGantt({ sectors }: { sectors: Sector[] }) {
                   const endD   = daysBetween(viewStart, addDays(pub, row.eOff))
                   const cs = Math.max(0, startD); const ce = Math.min(DAYS_SHOWN - 1, endD)
                   if (cs <= ce) {
-                    const bx = cs * DAY_W + 2
-                    const bw = Math.max((ce - cs + 1) * DAY_W - 4, 6)
-                    const by = yOff + 4
-                    const bh = STEP_H - 8
+                    const bx = cs * DAY_W + 2; const bw = Math.max((ce - cs + 1) * DAY_W - 4, 6)
+                    const by = yOff + 4; const bh = STEP_H - 8
                     bar = (
                       <g>
-                        <rect x={bx} y={by} width={bw} height={bh} rx={3}
-                          fill={ph.fill} stroke={ph.stroke} strokeWidth={1} />
+                        <rect x={bx} y={by} width={bw} height={bh} rx={3} fill={ph.fill} stroke={ph.stroke} strokeWidth={1} />
                         {startD < 0 && <polygon points={`${bx},${by} ${bx+6},${by+bh/2} ${bx},${by+bh}`} fill={ph.stroke} opacity={0.5} />}
                         {endD >= DAYS_SHOWN && <polygon points={`${bx+bw},${by} ${bx+bw-6},${by+bh/2} ${bx+bw},${by+bh}`} fill={ph.stroke} opacity={0.5} />}
-                        {bw > 26 && (
+                        {bw > 28 && (
                           <text x={bx + (startD < 0 ? 10 : 5)} y={by + bh / 2 + 4}
                             fontSize={8.5} fill={ph.text} fontWeight="600"
                             style={{ pointerEvents: 'none', userSelect: 'none' }}>
