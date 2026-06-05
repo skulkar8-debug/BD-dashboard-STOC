@@ -5,15 +5,23 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Building2, Users, CalendarDays, List } from 'lucide-react'
 import { useStore, fmtDate } from '@/lib/store'
-import { EventTypeBadge } from '@/components/roadmap/StatusBadge'
+// Inline badge using workflow event colors
+function EventBadge({ type }: { type: string }) {
+  const ev = WORKFLOW_EVENTS.find(e => e.label === type)
+  if (!ev) return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gray-100 text-gray-600">{type}</span>
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border"
+      style={{ background: ev.bg, borderColor: ev.border, color: ev.text }}>
+      {type}
+    </span>
+  )
+}
 import { SectorGrid }        from '@/components/roadmap/SectorGrid'
 import { ResourceGrid }      from '@/components/roadmap/ResourceGrid'
 import { CalendarMonthView } from '@/components/roadmap/CalendarMonthView'
-import type { EventType } from '@/lib/types'
+import { WORKFLOW_EVENTS } from '@/lib/workflowEvents'
 
-const EVENT_TYPES: EventType[] = [
-  'Report Publish', 'LinkedIn Outreach', 'TIP Creation', 'TIP Send', 'Follow-up', 'Reminder',
-]
+const EVENT_TYPES = WORKFLOW_EVENTS.map(e => e.label)
 
 type ViewMode = 'sector' | 'people' | 'month' | 'list'
 
@@ -115,7 +123,7 @@ export default function CalendarPage() {
                   return (
                     <tr key={e.id} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">{fmtDate(e.date)}</td>
-                      <td className="px-4 py-2.5"><EventTypeBadge type={e.type} /></td>
+                      <td className="px-4 py-2.5"><EventBadge type={e.type} /></td>
                       <td className="px-4 py-2.5">
                         {sec
                           ? <Link href={`/roadmap/sectors/${sec.id}`} className="font-medium text-indigo-600 hover:underline">{e.sector}</Link>

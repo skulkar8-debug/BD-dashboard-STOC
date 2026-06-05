@@ -1,4 +1,5 @@
 import type { AppData, Sector, CalendarEvent, Reminder, DataTipItem, Person, SectorStatus, Priority } from './types'
+import { WORKFLOW_EVENTS, type OwnerRole } from './workflowEvents'
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 function addDays(dateStr: string, n: number): string {
@@ -102,17 +103,24 @@ export const SECTORS: Sector[] = RAW_SECTORS.map(
   })
 )
 
-// ─── derive calendar events from sector dates ─────────────────────────────────
+// ─── derive calendar events from sector dates (full 17-step workflow) ────────
 function sectorToCalendarEvents(s: Sector): CalendarEvent[] {
   if (!s.publishDate) return []
   const p = s.publishDate
-  return [
-    { id: `EVT-${s.id}-CONNECT`,  date: addDays(p, -14), type: 'LinkedIn Outreach', sector: s.name, owner: s.bd, notes: `Start LinkedIn connect window — 14d before publish` },
-    { id: `EVT-${s.id}-PUBLISH`,  date: p,               type: 'Report Publish',    sector: s.name, owner: s.mr, notes: `Report publication date` },
-    { id: `EVT-${s.id}-TIPCREATE`, date: addDays(p, 1),   type: 'TIP Creation',      sector: s.name, owner: s.mr, notes: `Create TIP entry` },
-    { id: `EVT-${s.id}-TIPSEND`,  date: addDays(p, 5),   type: 'TIP Send',          sector: s.name, owner: s.bd, notes: `Send TIP to contacts` },
-    { id: `EVT-${s.id}-CALL`,     date: addDays(p, 8),   type: 'Follow-up',         sector: s.name, owner: s.bd, notes: `Follow-up and intel capture` },
-  ]
+  const ownerMap: Record<OwnerRole, string> = {
+    mr: s.mr, mrsupport: s.mrSupport, bd: s.bd, sm: s.sm, mp: s.mp,
+  }
+  return WORKFLOW_EVENTS.map(ev => {
+    const primaryOwner = ownerMap[ev.owners[0]] ?? ''
+    return {
+      id:     `EVT-${s.id}-${ev.key.toUpperCase()}`,
+      date:   addDays(p, ev.sOff),       // use start date for calendar placement
+      type:   ev.label,                  // clean label — no WF prefix
+      sector: s.name,
+      owner:  primaryOwner,
+      notes:  `${ev.label} · ${ev.wfSteps} · ${ev.phase}`,
+    }
+  })
 }
 
 // ─── derive reminders from sector dates ───────────────────────────────────────

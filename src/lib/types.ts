@@ -4,7 +4,8 @@ export type ReminderStatus = 'Open' | 'In Progress' | 'Done' | 'Overdue'
 export type TipStatus = 'Not Started' | 'In Progress' | 'Created' | 'Sent'
 export type DataReady = 'Yes' | 'No' | 'Partial'
 export type PersonRole = 'MP' | 'BD' | 'Senior Manager' | 'Market Research' | 'Market Research Support'
-export type EventType = 'Report Publish' | 'LinkedIn Outreach' | 'TIP Creation' | 'TIP Send' | 'Follow-up' | 'Reminder'
+// EventType is now open-ended to support the full 17-step workflow labels
+export type EventType = string
 
 export interface Sector {
   id: string

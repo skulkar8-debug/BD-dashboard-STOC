@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import type { CalendarEvent, Sector } from '@/lib/types'
+import { WORKFLOW_EVENTS } from '@/lib/workflowEvents'
 
 interface Props {
   events: CalendarEvent[]
@@ -10,23 +11,23 @@ interface Props {
   onSectorClick?: (id: string) => void
 }
 
-const EVENT_COLORS: Record<string, string> = {
-  'Report Publish':    'bg-green-100 text-green-800 border-green-300',
-  'LinkedIn Outreach': 'bg-blue-100 text-blue-800 border-blue-300',
-  'TIP Creation':      'bg-orange-100 text-orange-800 border-orange-300',
-  'TIP Send':          'bg-purple-100 text-purple-800 border-purple-300',
-  'Follow-up':         'bg-yellow-100 text-yellow-800 border-yellow-300',
-  'Reminder':          'bg-gray-100 text-gray-700 border-gray-300',
+// Build color maps dynamically from WORKFLOW_EVENTS
+function hexToRgb(hex: string) {
+  const r = parseInt(hex.slice(1,3),16)
+  const g = parseInt(hex.slice(3,5),16)
+  const b = parseInt(hex.slice(5,7),16)
+  return `rgb(${r},${g},${b})`
 }
 
-const DOT_COLORS: Record<string, string> = {
-  'Report Publish':    'bg-green-500',
-  'LinkedIn Outreach': 'bg-blue-400',
-  'TIP Creation':      'bg-orange-400',
-  'TIP Send':          'bg-purple-400',
-  'Follow-up':         'bg-yellow-400',
-  'Reminder':          'bg-gray-400',
-}
+const EVENT_BG:     Record<string, string> = {}
+const EVENT_BORDER: Record<string, string> = {}
+const EVENT_TEXT:   Record<string, string> = {}
+
+WORKFLOW_EVENTS.forEach(ev => {
+  EVENT_BG[ev.label]     = ev.bg
+  EVENT_BORDER[ev.label] = ev.border
+  EVENT_TEXT[ev.label]   = ev.text
+})
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -119,12 +120,20 @@ export function CalendarMonthView({ events, sectors, onSectorClick }: Props) {
                     {day}
                   </div>
                   <div className="space-y-0.5">
-                    {evts.slice(0, 3).map((e, j) => (
-                      <div key={j} className={`flex items-center gap-1 px-1 py-0.5 rounded text-[9px] font-medium border ${EVENT_COLORS[e.type] ?? 'bg-gray-100 text-gray-600 border-gray-200'} truncate`}>
-                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${DOT_COLORS[e.type] ?? 'bg-gray-400'}`} />
-                        <span className="truncate">{e.sector}</span>
-                      </div>
-                    ))}
+                    {evts.slice(0, 3).map((e, j) => {
+                      const bg     = EVENT_BG[e.type]     ?? '#f3f4f6'
+                      const border = EVENT_BORDER[e.type] ?? '#d1d5db'
+                      const color  = EVENT_TEXT[e.type]   ?? '#374151'
+                      return (
+                        <div key={j}
+                          className="flex items-center gap-1 px-1 py-0.5 rounded text-[9px] font-medium border truncate"
+                          style={{ background: bg, borderColor: border, color }}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: border }} />
+                          <span className="truncate">{e.sector}</span>
+                        </div>
+                      )
+                    })}
                     {evts.length > 3 && (
                       <div className="text-[9px] text-gray-400 pl-1">+{evts.length - 3} more</div>
                     )}
@@ -147,24 +156,26 @@ export function CalendarMonthView({ events, sectors, onSectorClick }: Props) {
           </div>
           <div className="space-y-2">
             {selectedEvents.map((e, i) => {
-              const sec = sectors.find(s => s.name === e.sector)
+              const sec    = sectors.find(s => s.name === e.sector)
+              const bg     = EVENT_BG[e.type]     ?? '#f9fafb'
+              const border = EVENT_BORDER[e.type] ?? '#e5e7eb'
+              const color  = EVENT_TEXT[e.type]   ?? '#374151'
               return (
-                <div key={i} className={`flex items-start gap-3 p-2.5 rounded-lg border ${EVENT_COLORS[e.type] ?? 'bg-gray-50 border-gray-200'}`}>
-                  <span className={`mt-0.5 w-2 h-2 rounded-full shrink-0 ${DOT_COLORS[e.type] ?? 'bg-gray-400'}`} />
+                <div key={i} className="flex items-start gap-3 p-2.5 rounded-lg border"
+                  style={{ background: bg, borderColor: border }}>
+                  <span className="mt-0.5 w-2 h-2 rounded-full shrink-0" style={{ background: border }} />
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold">{e.type}</span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-semibold" style={{ color }}>{e.type}</span>
                       {sec && (
-                        <button
-                          onClick={() => onSectorClick?.(sec.id)}
-                          className="text-[10px] text-indigo-600 hover:underline"
-                        >
+                        <button onClick={() => onSectorClick?.(sec.id)}
+                          className="text-[10px] text-indigo-600 hover:underline font-medium">
                           {e.sector} →
                         </button>
                       )}
                     </div>
-                    <div className="text-[11px] mt-0.5 opacity-80">{e.notes}</div>
-                    <div className="text-[10px] mt-0.5 opacity-60">Owner: {e.owner}</div>
+                    <div className="text-[11px] mt-0.5 text-gray-500">{e.notes}</div>
+                    <div className="text-[10px] mt-0.5 text-gray-400">Owner: {e.owner}</div>
                   </div>
                 </div>
               )

@@ -103,10 +103,10 @@ export function SectorGrid({ sectors }: { sectors: Sector[] }) {
     <div className="w-full select-none">
       {/* Legend — grouped by phase */}
       <div className="flex items-start gap-x-5 gap-y-2 flex-wrap mb-4">
-        {WORKFLOW_EVENTS.filter((e, i, a) => a.findIndex(x => x.key === e.key) === i).map(ev => (
+        {WORKFLOW_EVENTS.map(ev => (
           <div key={ev.key} className="flex items-center gap-1.5 text-xs text-gray-600">
             <span className="inline-block w-3 h-3 rounded-sm border flex-shrink-0" style={{ background: ev.bg, borderColor: ev.border }} />
-            <span className="whitespace-nowrap">{ev.wfSteps} {ev.label}</span>
+            <span className="whitespace-nowrap">{ev.label}</span>
           </div>
         ))}
         <div className="flex items-center gap-1.5 text-xs text-gray-600">
