@@ -87,22 +87,46 @@ const NOT_INTERESTED_PATTERNS = [
 ];
 
 const MEETING_PATTERNS = [
-  /\bschedule (a )?call\b/i,
+  // Formal scheduling language
+  /\bschedule (a )?(call|meeting|time|chat)\b/i,
   /\bbook (a )?(meeting|call|time|appointment)\b/i,
-  /\bset up (a )?(time|call|meeting)\b/i,
-  /let'?s (chat|talk|connect|speak|meet)/i,
-  /happy to (connect|chat|discuss|hop on)/i,
-  /available (to speak|for a call|to connect|this week)/i,
-  /when (are you|is a good time|would work)/i,
-  /what (time|day) works/i,
-  /free (for a call|to (chat|talk|connect))/i,
-  /could (we|you and I) (meet|talk|chat|speak|connect)/i,
-  /open to (a call|a chat|chatting|talking|connecting|meeting)/i,
-  /calendly/i,
+  /\bset up (a )?(time|call|meeting|chat)\b/i,
   /\bschedule (a )?(time|meeting)\b/i,
+  /calendly/i,
+  // "Let's" / "happy to" connect
+  /let'?s (chat|talk|connect|speak|meet|hop on)/i,
+  /happy to (connect|chat|discuss|hop on|jump on|talk|speak)/i,
+  /open to (a call|a chat|chatting|talking|connecting|meeting)/i,
+  /could (we|you and I) (meet|talk|chat|speak|connect)/i,
+  // "Are you free / available" — casual proposals
+  /\bare you free\b/i,
+  /\bwhen are you (free|available|open)\b/i,
+  /\bi'?m (available|free|open)\b.*\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}(:\d{2})?\s*(am|pm))/i,
+  /\bavailable (anytime|next|this|monday|tuesday|wednesday|thursday|friday)/i,
+  // "Does X time work?" patterns
+  /\bdoes\s+\d{1,2}(:\d{2})?\s*(am|pm)?\s*work\b/i,
+  /\bis\s+\d{1,2}(:\d{2})?\s*(am|pm)?\s*(good|ok|fine|work)\b/i,
+  /\bwhat (time|day) works\b/i,
+  /\bwhat'?s (a good time|your availability)\b/i,
+  // Rescheduling / "Can we push/move"
+  /\bcan we (push|move|reschedule|shift|change)\b/i,
+  /\bpush (it|the call|the meeting) to\b/i,
+  // "I can chat/talk on X day"
+  /\bi can (chat|talk|connect|speak|hop on)\b/i,
+  /\bi'?m (good|available|free) (on|for|this|next)\b/i,
+  // Phone numbers and call-back requests
+  /\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b/,          // 818-518-4582
+  /\bbest (number|phone|cell|line|way) (to reach|to contact|is)\b/i,
+  /\breach me (at|on)\s*[\d(]/i,
   /give me a call/i,
-  /call me (at|on)/i,
-  /reach me (at|on)/i,
+  /call me (at|on|back)/i,
+  /\bmy (number|cell|phone) is\b/i,
+  // "Available at X time" blocks
+  /\b\d{1,2}(:\d{2})?\s*(am|pm)\s*(to|-|–)\s*\d{1,2}(:\d{2})?\s*(am|pm)/i,  // "11am to 2pm"
+  // General availability / response
+  /available (to speak|for a call|to connect|this week|next week)/i,
+  /when (is a good time|would work|works for you)/i,
+  /free (for a call|to (chat|talk|connect))/i,
 ];
 
 const REFERRAL_PATTERNS = [
@@ -174,18 +198,28 @@ function classifyFromText(rawText: string): ReplyClassification {
 }
 
 export function classifyEmail(email: InstantlyEmail): ReplyClassification {
-  // ── Step 1: Respect Instantly's manually-set lead status (i_status) ──────────
-  // This is set by a human in the Instantly UI — it is the highest-priority signal.
-  // i_status -1 = Not Interested (manually marked)
-  // i_status  1 = Interested     (manually marked)
+  // ── Step 1: Respect Instantly's i_status field ───────────────────────────────
+  // i_status -1 = Not Interested  (confirmed: 0 of these have positive ai_interest_value)
+  // i_status  1 = Interested/engaged (Instantly detected engagement)
   // i_status  0 / null = not set
   if (email.i_status === -1) {
-    // Manually marked "Not Interested" in Instantly — never override this
     return 'not_interested';
   }
 
   const bodyText = email.body?.text ?? email.content_preview ?? '';
   const textClass = classifyFromText(bodyText);
+
+  // ── Step 1b: i_status=1 safety net ───────────────────────────────────────────
+  // Instantly flagged this lead as interested/engaged. If our text classifier
+  // can't find a specific signal (neutral), lean positive rather than silently
+  // dropping it. Only apply when text isn't explicitly negative.
+  if (
+    email.i_status === 1 &&
+    textClass === 'neutral_needs_review' &&
+    (email.ai_interest_value == null || email.ai_interest_value >= 0)
+  ) {
+    return 'more_info_requested'; // conservative positive — appears in inbox
+  }
 
   // ── Step 2: Instantly AI value ───────────────────────────────────────────────
   //   >= 2 = clearly positive
