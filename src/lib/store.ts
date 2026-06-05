@@ -124,5 +124,10 @@ export function daysFrom(dateStr: string): number | null {
 
 export function fmtDate(dateStr: string): string {
   if (!dateStr) return '—'
-  return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  // Always use UTC timezone to avoid off-by-one day errors when the user's
+  // local timezone is behind UTC (e.g. '2026-06-11' parsed as UTC midnight
+  // would display as Jun 10 in US Eastern time without this flag).
+  return new Date(dateStr + 'T00:00:00Z').toLocaleDateString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC',
+  })
 }
