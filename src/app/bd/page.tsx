@@ -1111,63 +1111,6 @@ function AnalyticsTab({
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Classification breakdown */}
-        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 text-sm font-semibold text-gray-700">
-            Reply Classification Breakdown
-          </div>
-          <div className="p-4 space-y-2.5">
-            {classCounts.map(([cls, count]) => {
-              const label = CLASSIFICATION_LABELS[cls as keyof typeof CLASSIFICATION_LABELS] ?? cls;
-              const isPos = ['positive_interested','meeting_requested','referral_given','more_info_requested'].includes(cls);
-              const barColor = isPos ? '#10b981' : cls === 'neutral_needs_review' ? '#9ca3af' : '#ef4444';
-              return (
-                <div key={cls} className="flex items-center gap-2">
-                  <div className="text-xs text-gray-600 w-44 flex-shrink-0 truncate">{label}</div>
-                  <div className="flex-1">
-                    <Bar value={count} max={maxClass} color={barColor} />
-                  </div>
-                  <div className="text-xs font-medium tabular-nums text-gray-700 w-10 text-right">{count}</div>
-                  <div className="text-[11px] text-gray-400 w-10 text-right">{totalReplies > 0 ? (count / totalReplies * 100).toFixed(0) + '%' : '—'}</div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Org performance comparison */}
-        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 text-sm font-semibold text-gray-700">
-            Org Performance Comparison
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-gray-400 text-[10px] uppercase tracking-wide border-b border-gray-100">
-                  <th className="text-left px-4 py-2">Org</th>
-                  <th className="text-right px-3 py-2">Camps</th>
-                  <th className="text-right px-3 py-2">Replies</th>
-                  <th className="text-right px-3 py-2">Positive</th>
-                  <th className="text-right px-3 py-2">Pos%</th>
-                </tr>
-              </thead>
-              <tbody>
-                {byOrg.map((o) => (
-                  <tr key={o.label} className="border-b border-gray-50 hover:bg-gray-50">
-                    <td className="px-4 py-2 font-medium text-gray-800">{o.label}</td>
-                    <td className="text-right px-3 py-2 text-gray-500">{o.campaigns}</td>
-                    <td className="text-right px-3 py-2">{o.replies}</td>
-                    <td className="text-right px-3 py-2 text-emerald-600 font-semibold">{o.positive}</td>
-                    <td className="text-right px-3 py-2">{o.replies > 0 ? (o.positive / o.replies * 100).toFixed(1) + '%' : '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
       {/* ── Monthly Reply Activity ─────────────────────────────────────────────── */}
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
         {/* Header */}
@@ -1343,6 +1286,63 @@ function AnalyticsTab({
                     <td className="text-right px-3 py-2 text-emerald-600 font-bold">{c.positive_reply_count}</td>
                     <td className="text-right px-3 py-2">{c.actual_received_count}</td>
                     <td className="text-right px-3 py-2">{c.actual_received_count > 0 ? (c.positive_reply_count / c.actual_received_count * 100).toFixed(1) + '%' : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Classification breakdown */}
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 text-sm font-semibold text-gray-700">
+            Reply Classification Breakdown
+          </div>
+          <div className="p-4 space-y-2.5">
+            {classCounts.map(([cls, count]) => {
+              const label = CLASSIFICATION_LABELS[cls as keyof typeof CLASSIFICATION_LABELS] ?? cls;
+              const isPos = ['positive_interested','meeting_requested','referral_given','more_info_requested'].includes(cls);
+              const barColor = isPos ? '#10b981' : cls === 'neutral_needs_review' ? '#9ca3af' : '#ef4444';
+              return (
+                <div key={cls} className="flex items-center gap-2">
+                  <div className="text-xs text-gray-600 w-44 flex-shrink-0 truncate">{label}</div>
+                  <div className="flex-1">
+                    <Bar value={count} max={maxClass} color={barColor} />
+                  </div>
+                  <div className="text-xs font-medium tabular-nums text-gray-700 w-10 text-right">{count}</div>
+                  <div className="text-[11px] text-gray-400 w-10 text-right">{totalReplies > 0 ? (count / totalReplies * 100).toFixed(0) + '%' : '—'}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Org performance comparison */}
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 text-sm font-semibold text-gray-700">
+            Org Performance Comparison
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-gray-400 text-[10px] uppercase tracking-wide border-b border-gray-100">
+                  <th className="text-left px-4 py-2">Org</th>
+                  <th className="text-right px-3 py-2">Camps</th>
+                  <th className="text-right px-3 py-2">Replies</th>
+                  <th className="text-right px-3 py-2">Positive</th>
+                  <th className="text-right px-3 py-2">Pos%</th>
+                </tr>
+              </thead>
+              <tbody>
+                {byOrg.map((o) => (
+                  <tr key={o.label} className="border-b border-gray-50 hover:bg-gray-50">
+                    <td className="px-4 py-2 font-medium text-gray-800">{o.label}</td>
+                    <td className="text-right px-3 py-2 text-gray-500">{o.campaigns}</td>
+                    <td className="text-right px-3 py-2">{o.replies}</td>
+                    <td className="text-right px-3 py-2 text-emerald-600 font-semibold">{o.positive}</td>
+                    <td className="text-right px-3 py-2">{o.replies > 0 ? (o.positive / o.replies * 100).toFixed(1) + '%' : '—'}</td>
                   </tr>
                 ))}
               </tbody>

@@ -24,6 +24,8 @@ type StateStats = {
   sectors: string[];
   top_sector: string;
   top_org: string;
+  best_campaign_name: string;
+  best_campaign_positive: number;
 };
 
 // ─── Color-by options ────────────────────────────────────────────────────────
@@ -86,6 +88,8 @@ function computeStateStats(
   // Sector/org frequency per state (for top_sector / top_org)
   const sectorFreq = new Map<string, Map<string, number>>();
   const orgFreq = new Map<string, Map<string, { label: string; count: number }>>();
+  // Best campaign per state — tracked by positive_reply_count
+  const bestCampaign = new Map<string, { name: string; positive: number }>();
 
   campaigns.forEach((c) => {
     if (!c.state || c.state === "Unmapped") return;
@@ -101,6 +105,8 @@ function computeStateStats(
         sectors: [],
         top_sector: "—",
         top_org: "—",
+        best_campaign_name: "—",
+        best_campaign_positive: 0,
       };
       map.set(c.state, s);
     }
@@ -121,6 +127,12 @@ function computeStateStats(
     const existing = of.get(c.org_id);
     of.set(c.org_id, { label: c.org_label, count: (existing?.count ?? 0) + 1 });
     orgFreq.set(c.state, of);
+
+    // Best campaign
+    const cur = bestCampaign.get(c.state);
+    if (!cur || c.positive_reply_count > cur.positive) {
+      bestCampaign.set(c.state, { name: c.campaign_name, positive: c.positive_reply_count });
+    }
   });
 
   emails.forEach((e) => {
@@ -140,6 +152,10 @@ function computeStateStats(
 
     const topOrg = [...(orgFreq.get(stateName)?.values() ?? [])].sort((a, b) => b.count - a.count)[0];
     s.top_org = topOrg ? topOrg.label : "—";
+
+    const bc = bestCampaign.get(stateName);
+    s.best_campaign_name    = bc && bc.positive > 0 ? bc.name    : "—";
+    s.best_campaign_positive = bc && bc.positive > 0 ? bc.positive : 0;
   });
 
   return map;
@@ -362,7 +378,7 @@ export default function StatePerformanceMap({ campaigns, emails }: Props) {
         {/* Tooltip info card — top right */}
         {loadState === "ready" && (
           <div
-            className="absolute top-3 right-3 z-[1000] w-56 bg-white/95 border border-gray-200 rounded-xl shadow-lg p-3 text-xs pointer-events-none"
+            className="absolute top-3 right-3 z-[1000] w-64 bg-white/95 border border-gray-200 rounded-xl shadow-lg p-3 text-xs pointer-events-none"
             style={{ backdropFilter: "blur(4px)" }}
           >
             {!hoveredState ? (
@@ -389,6 +405,18 @@ export default function StatePerformanceMap({ campaigns, emails }: Props) {
                   <TRow label="Active Sectors" value={hovered.sectors.length} />
                   <TRow label="Top Sector" value={hovered.top_sector} />
                   <TRow label="Top Org" value={hovered.top_org} />
+                  {hovered.best_campaign_positive > 0 && (
+                    <>
+                      <div className="border-t border-gray-100 my-1.5" />
+                      <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Best Campaign</div>
+                      <div className="text-gray-800 font-medium leading-snug" style={{ fontSize: 11 }}>
+                        {hovered.best_campaign_name}
+                      </div>
+                      <div className="text-emerald-600 font-semibold text-xs mt-0.5">
+                        {hovered.best_campaign_positive} positive {hovered.best_campaign_positive === 1 ? 'reply' : 'replies'}
+                      </div>
+                    </>
+                  )}
                 </div>
               </>
             )}
