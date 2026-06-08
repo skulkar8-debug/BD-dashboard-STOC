@@ -56,6 +56,16 @@ export const CAMPAIGN_SECTOR_MAP: SectorMapping[] = [
   { campaign_name_pattern: 'Physical Therapy',                   sector: 'Healthcare Services' },
   { campaign_name_pattern: 'Pest Control',                       sector: 'Multi-Site Consumer Services' },
   { campaign_name_pattern: 'Asphalt',                            sector: 'Roofing / Claims' },
+  // Towing Service — including common misspellings in campaign names
+  { campaign_name_pattern: 'Towing',                             sector: 'Towing Service' },
+  { campaign_name_pattern: 'Tow Service',                        sector: 'Towing Service' },
+  { campaign_name_pattern: 'Tow Svc',                            sector: 'Towing Service' },
+  { campaign_name_pattern: 'Toing',                              sector: 'Towing Service' }, // misspell
+  { campaign_name_pattern: 'Towng',                              sector: 'Towing Service' }, // misspell
+  { campaign_name_pattern: 'Towring',                            sector: 'Towing Service' }, // misspell
+  { campaign_name_pattern: 'Tow Co',                             sector: 'Towing Service' },
+  { campaign_name_pattern: 'Auto Tow',                           sector: 'Towing Service' },
+  { campaign_name_pattern: 'Road Service',                       sector: 'Towing Service' },
 ];
 
 export const SECTOR_OPTIONS = [
@@ -71,6 +81,7 @@ export const SECTOR_OPTIONS = [
   'Funeral Home',
   'Physical Therapy',
   'Pest Control',
+  'Towing Service',
   'Manufacturing',
   'Multi-Site Consumer Services',
   'Financial / Professional Services',

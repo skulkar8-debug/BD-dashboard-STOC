@@ -13,6 +13,7 @@ import {
   Loader2, RefreshCw, AlertTriangle, Bug, BarChart3,
   Calendar, Layers, MapPin, Table2, Inbox, TrendingUp, ChevronDown, ChevronRight,
 } from 'lucide-react';
+// Note: Calendar, TrendingUp kept for potential future use
 import Image from 'next/image';
 
 // Leaflet is browser-only — must be dynamically imported with SSR disabled
@@ -29,13 +30,12 @@ const StatePerformanceMap = dynamic(
 );
 
 const TABS = [
-  { id: 'overview',  label: 'Overview',             icon: <BarChart3 className="h-3.5 w-3.5" /> },
-  { id: 'sectors',   label: 'Sectors',               icon: <Layers className="h-3.5 w-3.5" /> },
-  { id: 'states',    label: 'States',                icon: <MapPin className="h-3.5 w-3.5" /> },
-  { id: 'campaigns', label: 'Campaigns',             icon: <Table2 className="h-3.5 w-3.5" /> },
-  { id: 'inbox',     label: 'Inbox',                 icon: <Inbox className="h-3.5 w-3.5" /> },
-  { id: 'analytics', label: 'Analytics',             icon: <BarChart3 className="h-3.5 w-3.5" /> },
-  { id: 'debug',     label: 'Debug',                 icon: <Bug className="h-3.5 w-3.5" /> },
+  { id: 'overview',  label: 'Overview',   icon: <BarChart3 className="h-3.5 w-3.5" /> },
+  { id: 'sectors',   label: 'Sectors',    icon: <Layers className="h-3.5 w-3.5" /> },
+  { id: 'states',    label: 'States',     icon: <MapPin className="h-3.5 w-3.5" /> },
+  { id: 'inbox',     label: 'Inbox',      icon: <Inbox className="h-3.5 w-3.5" /> },
+  { id: 'analytics', label: 'Analytics',  icon: <TrendingUp className="h-3.5 w-3.5" /> },
+  { id: 'debug',     label: 'Debug',      icon: <Bug className="h-3.5 w-3.5" /> },
 ] as const;
 type TabId = (typeof TABS)[number]['id'];
 
@@ -968,22 +968,13 @@ function TrendsTab({ emails }: { emails: NormalizedEmail[] }) {
 
 // ─── Analytics ───────────────────────────────────────────────────────────────
 
-/** Convert "2025-W41" → "Oct 6" (Monday of that ISO week) */
-function weekToLabel(weekStr: string): string {
+/** Convert "2025-10" → "Oct '25" */
+function monthToLabel(monthKey: string): string {
   try {
-    const [yearStr, wkStr] = weekStr.split('-W');
-    const year = parseInt(yearStr, 10);
-    const week = parseInt(wkStr, 10);
-    if (isNaN(year) || isNaN(week)) return weekStr;
-    // ISO week 1 = week containing Jan 4
-    const jan4 = new Date(year, 0, 4);
-    const jan4DayOfWeek = jan4.getDay() || 7; // Mon=1..Sun=7
-    const monday = new Date(jan4);
-    monday.setDate(jan4.getDate() - (jan4DayOfWeek - 1) + (week - 1) * 7);
-    return monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  } catch {
-    return weekStr;
-  }
+    const [year, month] = monthKey.split('-');
+    const d = new Date(parseInt(year, 10), parseInt(month, 10) - 1, 1);
+    return d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+  } catch { return monthKey; }
 }
 
 /** Extract a company hint from an email address domain */
@@ -1048,20 +1039,45 @@ function AnalyticsTab({
   }, [campaigns, emails]);
   const maxSectorPos = Math.max(...bySector.map(([, v]) => v.positive), 1);
 
-  // ── Weekly reply trend ─────────────────────────────────────────────────────
-  const byWeek = useMemo(() => {
-    const m = new Map<string, { replies: number; positive: number; meetings: number }>();
+  // ── Monthly activity — richer breakdown per period ────────────────────────
+  type MonthRow = {
+    total: number; positive: number; meetings: number;
+    more_info: number; referral: number; neutral: number;
+    not_interested: number; unsubscribe: number; ooo: number;
+  };
+  const byMonth = useMemo(() => {
+    const m = new Map<string, MonthRow>();
     emails.forEach((e) => {
-      if (e.week === 'Unknown') return;
-      const cur = m.get(e.week) ?? { replies: 0, positive: 0, meetings: 0 };
-      cur.replies++;
-      if (e.is_positive) cur.positive++;
-      if (e.final_classification === 'meeting_requested') cur.meetings++;
-      m.set(e.week, cur);
+      if (!e.timestamp_email || e.timestamp_email.length < 7) return;
+      const key = e.timestamp_email.slice(0, 7); // "2025-10"
+      const cur = m.get(key) ?? { total: 0, positive: 0, meetings: 0, more_info: 0, referral: 0, neutral: 0, not_interested: 0, unsubscribe: 0, ooo: 0 };
+      cur.total++;
+      const cls = e.final_classification;
+      if (cls === 'positive_interested')  cur.positive++;
+      else if (cls === 'meeting_requested') cur.meetings++;
+      else if (cls === 'more_info_requested') cur.more_info++;
+      else if (cls === 'referral_given')   cur.referral++;
+      else if (cls === 'neutral_needs_review') cur.neutral++;
+      else if (cls === 'not_interested')   cur.not_interested++;
+      else if (cls === 'unsubscribe')      cur.unsubscribe++;
+      else if (cls === 'out_of_office')    cur.ooo++;
+      m.set(key, cur);
     });
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [emails]);
-  const maxWeekReplies = Math.max(...byWeek.map(([, v]) => v.replies), 1);
+  const maxMonthTotal = Math.max(...byMonth.map(([, v]) => v.total), 1);
+
+  // Stacked segment colors — order matters (drawn left to right in bar)
+  const SEGMENT_DEFS: Array<{ key: keyof MonthRow; label: string; color: string; textColor: string }> = [
+    { key: 'positive',      label: 'Positive',       color: '#10b981', textColor: 'text-emerald-600' },
+    { key: 'meetings',      label: 'Meeting',         color: '#8b5cf6', textColor: 'text-purple-600' },
+    { key: 'more_info',     label: 'More Info',       color: '#3b82f6', textColor: 'text-blue-600' },
+    { key: 'referral',      label: 'Referral',        color: '#06b6d4', textColor: 'text-cyan-600' },
+    { key: 'neutral',       label: 'Neutral',         color: '#d1d5db', textColor: 'text-gray-400' },
+    { key: 'not_interested',label: 'Not Interested',  color: '#ef4444', textColor: 'text-red-500' },
+    { key: 'unsubscribe',   label: 'Unsubscribe',     color: '#f97316', textColor: 'text-orange-500' },
+    { key: 'ooo',           label: 'OOO',             color: '#e5e7eb', textColor: 'text-gray-300' },
+  ];
 
   // ── Top campaigns ──────────────────────────────────────────────────────────
   const topCampaigns = [...campaigns]
@@ -1085,7 +1101,7 @@ function AnalyticsTab({
       {/* Summary strip */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         {[
-          { label: 'Total Emails', value: totalReplies.toLocaleString(), color: 'text-gray-900' },
+          { label: 'Total Replies', value: totalReplies.toLocaleString(), color: 'text-gray-900' },
           { label: 'Positive', value: positive.length.toLocaleString(), color: 'text-emerald-600' },
           { label: 'Pos. Rate', value: totalReplies > 0 ? (positive.length / totalReplies * 100).toFixed(1) + '%' : '—', color: 'text-emerald-600' },
           { label: 'Sent (all-time)', value: totalSent.toLocaleString(), color: 'text-blue-600' },
@@ -1155,33 +1171,126 @@ function AnalyticsTab({
         </div>
       </div>
 
-      {/* Weekly trend — replies, positives, meetings */}
+      {/* ── Monthly Reply Activity — stacked classification view ─────────────── */}
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
-          <span className="text-sm font-semibold text-gray-700">Weekly Reply Activity</span>
-          <div className="flex gap-4 text-[11px] text-gray-400">
-            <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-sm inline-block bg-blue-200" /> All Replies</span>
-            <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-sm inline-block bg-emerald-400" /> Positive</span>
-            <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-sm inline-block bg-purple-400" /> Meetings</span>
+        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-start justify-between flex-wrap gap-2">
+          <div>
+            <span className="text-sm font-semibold text-gray-700">Monthly Reply Activity</span>
+            <div className="text-[11px] text-gray-400 mt-0.5">
+              Bar width = total volume that month. Color breakdown shows reply quality — spot high unsubscribe (orange) or low positive (no green) months instantly.
+            </div>
+          </div>
+          {/* Legend */}
+          <div className="flex flex-wrap gap-x-3 gap-y-1">
+            {SEGMENT_DEFS.map((s) => (
+              <span key={s.key} className="flex items-center gap-1 text-[10px] text-gray-500">
+                <span className="w-2.5 h-2.5 rounded-sm inline-block flex-shrink-0" style={{ backgroundColor: s.color }} />
+                {s.label}
+              </span>
+            ))}
           </div>
         </div>
-        <div className="p-4 space-y-1.5">
-          {byWeek.length === 0 && <div className="text-center py-6 text-sm text-gray-400">No dated email data in current filter</div>}
-          {byWeek.map(([week, v]) => (
-            <div key={week} className="flex items-center gap-3">
-              <div className="text-[11px] text-gray-500 w-16 flex-shrink-0 font-medium">{weekToLabel(week)}</div>
-              <div className="flex-1 flex items-center h-5 gap-0.5">
-                <div className="h-full rounded-l bg-blue-200" style={{ width: `${(v.replies / maxWeekReplies) * 100}%`, minWidth: v.replies > 0 ? 3 : 0 }} />
-                <div className="h-full bg-emerald-400" style={{ width: `${(v.positive / maxWeekReplies) * 100}%`, minWidth: v.positive > 0 ? 3 : 0 }} />
-                <div className="h-full rounded-r bg-purple-400" style={{ width: `${(v.meetings / maxWeekReplies) * 100}%`, minWidth: v.meetings > 0 ? 3 : 0 }} />
+
+        {byMonth.length === 0 && (
+          <div className="text-center py-10 text-sm text-gray-400">No dated email data in current filter</div>
+        )}
+
+        <div className="p-4 space-y-2">
+          {byMonth.map(([monthKey, v]) => {
+            const barW = (v.total / maxMonthTotal) * 100;
+            const posRate = v.total > 0 ? ((v.positive + v.meetings + v.more_info + v.referral) / v.total * 100).toFixed(0) : '0';
+            const unsubRate = v.total > 0 ? (v.unsubscribe / v.total * 100).toFixed(0) : '0';
+            const isHighUnsub = v.unsubscribe > 0 && parseInt(unsubRate) >= 10;
+            const isLowEngage = v.total >= 5 && parseInt(posRate) < 5;
+
+            return (
+              <div key={monthKey} className="flex items-center gap-3 group">
+                {/* Month label */}
+                <div className="text-xs text-gray-600 font-semibold w-14 flex-shrink-0 text-right">
+                  {monthToLabel(monthKey)}
+                </div>
+
+                {/* Stacked bar */}
+                <div className="flex-1 h-6 bg-gray-100 rounded-md overflow-hidden flex" style={{ maxWidth: `${barW}%`, minWidth: v.total > 0 ? '4px' : 0, width: '100%' }}>
+                  {SEGMENT_DEFS.map((seg) => {
+                    const count = v[seg.key] as number;
+                    if (!count) return null;
+                    const segW = (count / v.total) * 100;
+                    return (
+                      <div
+                        key={seg.key}
+                        title={`${seg.label}: ${count}`}
+                        style={{ width: `${segW}%`, backgroundColor: seg.color, minWidth: 2 }}
+                        className="h-full transition-opacity group-hover:opacity-90"
+                      />
+                    );
+                  })}
+                </div>
+
+                {/* Metrics */}
+                <div className="flex items-center gap-3 text-[11px] flex-shrink-0 w-64">
+                  <span className="text-gray-500 w-16 text-right tabular-nums">{v.total} replies</span>
+                  <span className="text-emerald-600 font-semibold tabular-nums">{v.positive + v.meetings + v.more_info + v.referral} pos.</span>
+                  <span className="text-gray-400 tabular-nums">{posRate}%</span>
+                  {isHighUnsub && (
+                    <span className="text-orange-600 font-semibold" title={`${v.unsubscribe} unsubscribes`}>⚠ {unsubRate}% unsub</span>
+                  )}
+                  {isLowEngage && !isHighUnsub && (
+                    <span className="text-gray-400 text-[10px]">low engagement</span>
+                  )}
+                </div>
               </div>
-              <div className="text-[11px] text-gray-600 w-52 text-right flex-shrink-0">
-                <span>{v.replies} replies</span>
-                <span className="text-emerald-600 ml-1">· {v.positive} pos.</span>
-                <span className="text-purple-600 ml-1">· {v.meetings} mtgs</span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
+        </div>
+
+        {/* Detailed table */}
+        {byMonth.length > 0 && (
+          <div className="border-t border-gray-100 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-100 text-[10px] text-gray-400 uppercase tracking-wide">
+                  <th className="text-left px-4 py-2">Month</th>
+                  <th className="text-right px-2 py-2">Total</th>
+                  <th className="text-right px-2 py-2 text-emerald-600">Positive</th>
+                  <th className="text-right px-2 py-2 text-purple-600">Meeting</th>
+                  <th className="text-right px-2 py-2 text-blue-600">More Info</th>
+                  <th className="text-right px-2 py-2 text-cyan-600">Referral</th>
+                  <th className="text-right px-2 py-2 text-gray-400">Neutral</th>
+                  <th className="text-right px-2 py-2 text-red-500">Not Int.</th>
+                  <th className="text-right px-2 py-2 text-orange-500">Unsub</th>
+                  <th className="text-right px-2 py-2">OOO</th>
+                  <th className="text-right px-3 py-2">Pos%</th>
+                </tr>
+              </thead>
+              <tbody>
+                {byMonth.map(([monthKey, v]) => {
+                  const engagedTotal = v.positive + v.meetings + v.more_info + v.referral;
+                  const posRate = v.total > 0 ? (engagedTotal / v.total * 100).toFixed(1) + '%' : '—';
+                  const hasIssue = v.unsubscribe > 0 && v.total > 0 && (v.unsubscribe / v.total) >= 0.1;
+                  return (
+                    <tr key={monthKey} className={`border-b border-gray-50 hover:bg-gray-50 ${hasIssue ? 'bg-orange-50/40' : ''}`}>
+                      <td className="px-4 py-1.5 font-semibold text-gray-700">{monthToLabel(monthKey)}</td>
+                      <td className="text-right px-2 py-1.5 font-medium">{v.total}</td>
+                      <td className="text-right px-2 py-1.5 text-emerald-600 font-semibold">{v.positive || '—'}</td>
+                      <td className="text-right px-2 py-1.5 text-purple-600">{v.meetings || '—'}</td>
+                      <td className="text-right px-2 py-1.5 text-blue-600">{v.more_info || '—'}</td>
+                      <td className="text-right px-2 py-1.5 text-cyan-600">{v.referral || '—'}</td>
+                      <td className="text-right px-2 py-1.5 text-gray-400">{v.neutral || '—'}</td>
+                      <td className="text-right px-2 py-1.5 text-red-500">{v.not_interested || '—'}</td>
+                      <td className={`text-right px-2 py-1.5 font-semibold ${v.unsubscribe > 0 ? 'text-orange-500' : 'text-gray-300'}`}>{v.unsubscribe || '—'}</td>
+                      <td className="text-right px-2 py-1.5 text-gray-400">{v.ooo || '—'}</td>
+                      <td className="text-right px-3 py-1.5 font-semibold text-emerald-600">{posRate}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="px-4 py-2 text-[10px] text-amber-600 border-t border-gray-100 bg-amber-50/50">
+          ⚠ Bounce &amp; unsubscribe counts in this table come from the Instantly email classifications, not campaign analytics (which are all-time only and not date-filterable). Use the Campaigns tab for all-time bounce/unsub rates per campaign.
         </div>
       </div>
 
@@ -1424,7 +1533,6 @@ export default function BDDashboard() {
             {tab === 'overview'  && <OverviewTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} stats={bd.stats} analyticsAvailable={bd.stats.analyticsAvailable} />}
             {tab === 'sectors'   && <SectorsTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} />}
             {tab === 'states'    && <StatesTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} />}
-            {tab === 'campaigns' && <CampaignTable campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} />}
             {tab === 'inbox'     && <InboxTab emails={bd.filteredEmails} />}
             {tab === 'analytics' && <AnalyticsTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} />}
             {tab === 'debug'     && <DebugTab data={bd.data} />}
