@@ -30,12 +30,10 @@ const StatePerformanceMap = dynamic(
 
 const TABS = [
   { id: 'overview',  label: 'Overview',             icon: <BarChart3 className="h-3.5 w-3.5" /> },
-  { id: 'agenda',    label: 'Weekly Agenda',         icon: <Calendar className="h-3.5 w-3.5" /> },
   { id: 'sectors',   label: 'Sectors',               icon: <Layers className="h-3.5 w-3.5" /> },
   { id: 'states',    label: 'States',                icon: <MapPin className="h-3.5 w-3.5" /> },
   { id: 'campaigns', label: 'Campaigns',             icon: <Table2 className="h-3.5 w-3.5" /> },
   { id: 'inbox',     label: 'Inbox',                 icon: <Inbox className="h-3.5 w-3.5" /> },
-  { id: 'trends',    label: 'Trends',                icon: <TrendingUp className="h-3.5 w-3.5" /> },
   { id: 'analytics', label: 'Analytics',             icon: <BarChart3 className="h-3.5 w-3.5" /> },
   { id: 'debug',     label: 'Debug',                 icon: <Bug className="h-3.5 w-3.5" /> },
 ] as const;
@@ -772,11 +770,18 @@ function EmailList({ emails }: { emails: NormalizedEmail[] }) {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-medium text-sm text-gray-800">{e.from_name || e.from_email}</span>
-                  <span className="text-xs text-gray-400">{e.from_email}</span>
+                  {companyFromEmail(e.from_email) && (
+                    <span className="text-xs text-blue-700 font-medium bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded">
+                      {companyFromEmail(e.from_email)}
+                    </span>
+                  )}
                   <StatusBadge value={displayClass} />
                   {e.is_positive && <span className="text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-medium">✓</span>}
                 </div>
-                <div className="text-[11px] text-gray-400 mt-0.5">{e.campaign_name} · {e.sector} · {e.state} · {e.org_label} · {new Date(e.timestamp_email).toLocaleDateString()}</div>
+                <div className="text-[11px] text-gray-400 mt-0.5">
+                  <span className="text-gray-500">{e.from_email}</span>
+                  {' · '}{e.campaign_name} · {e.sector} · {e.state} · {e.org_label} · {new Date(e.timestamp_email).toLocaleDateString()}
+                </div>
                 <div className="text-xs text-gray-600 mt-1 line-clamp-2">{e.content_preview || e.body_text.slice(0, 180)}</div>
               </div>
               {open ? <ChevronDown className="h-4 w-4 text-gray-400 mt-1 flex-shrink-0" /> : <ChevronRight className="h-4 w-4 text-gray-400 mt-1 flex-shrink-0" />}
@@ -963,6 +968,34 @@ function TrendsTab({ emails }: { emails: NormalizedEmail[] }) {
 
 // ─── Analytics ───────────────────────────────────────────────────────────────
 
+/** Convert "2025-W41" → "Oct 6" (Monday of that ISO week) */
+function weekToLabel(weekStr: string): string {
+  try {
+    const [yearStr, wkStr] = weekStr.split('-W');
+    const year = parseInt(yearStr, 10);
+    const week = parseInt(wkStr, 10);
+    if (isNaN(year) || isNaN(week)) return weekStr;
+    // ISO week 1 = week containing Jan 4
+    const jan4 = new Date(year, 0, 4);
+    const jan4DayOfWeek = jan4.getDay() || 7; // Mon=1..Sun=7
+    const monday = new Date(jan4);
+    monday.setDate(jan4.getDate() - (jan4DayOfWeek - 1) + (week - 1) * 7);
+    return monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  } catch {
+    return weekStr;
+  }
+}
+
+/** Extract a company hint from an email address domain */
+function companyFromEmail(email: string): string | null {
+  const domain = email?.split('@')[1] ?? '';
+  const personal = ['gmail.com','yahoo.com','hotmail.com','outlook.com','icloud.com','aol.com','me.com','msn.com','live.com'];
+  if (!domain || personal.includes(domain.toLowerCase())) return null;
+  // Humanize: remove TLD, replace hyphens with spaces, title-case
+  const name = domain.split('.')[0].replace(/-/g, ' ');
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
 function AnalyticsTab({
   campaigns,
   emails,
@@ -1136,7 +1169,7 @@ function AnalyticsTab({
           {byWeek.length === 0 && <div className="text-center py-6 text-sm text-gray-400">No dated email data in current filter</div>}
           {byWeek.map(([week, v]) => (
             <div key={week} className="flex items-center gap-3">
-              <div className="text-[11px] font-mono text-gray-500 w-20 flex-shrink-0">{week}</div>
+              <div className="text-[11px] text-gray-500 w-16 flex-shrink-0 font-medium">{weekToLabel(week)}</div>
               <div className="flex-1 flex items-center h-5 gap-0.5">
                 <div className="h-full rounded-l bg-blue-200" style={{ width: `${(v.replies / maxWeekReplies) * 100}%`, minWidth: v.replies > 0 ? 3 : 0 }} />
                 <div className="h-full bg-emerald-400" style={{ width: `${(v.positive / maxWeekReplies) * 100}%`, minWidth: v.positive > 0 ? 3 : 0 }} />
@@ -1389,12 +1422,10 @@ export default function BDDashboard() {
         ) : !bd.data ? null : (
           <>
             {tab === 'overview'  && <OverviewTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} stats={bd.stats} analyticsAvailable={bd.stats.analyticsAvailable} />}
-            {tab === 'agenda'    && <AgendaTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} />}
             {tab === 'sectors'   && <SectorsTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} />}
             {tab === 'states'    && <StatesTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} />}
             {tab === 'campaigns' && <CampaignTable campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} />}
             {tab === 'inbox'     && <InboxTab emails={bd.filteredEmails} />}
-            {tab === 'trends'    && <TrendsTab emails={bd.filteredEmails} />}
             {tab === 'analytics' && <AnalyticsTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} />}
             {tab === 'debug'     && <DebugTab data={bd.data} />}
           </>

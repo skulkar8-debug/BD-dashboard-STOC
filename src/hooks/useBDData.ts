@@ -129,16 +129,26 @@ export function useBDData() {
   const positiveEmails = useMemo(() => filteredEmails.filter((e) => e.is_positive), [filteredEmails]);
 
   // Dimension options derived from ALL campaigns (not filtered) for the filter dropdowns
-  const options = useMemo(() => ({
-    orgs: [...new Map(allCampaigns.map((c) => [c.org_id, c.org_label])).entries()]
-      .map(([id, label]) => ({ id, label })),
-    sectors: [...new Set(allCampaigns.map((c) => c.sector))].sort(),
-    states: [...new Set(
-      allCampaigns.map((c) => c.state).filter((s) => s && s !== 'Unmapped')
-    )].sort(),
-    campaign_statuses: [...new Set(allCampaigns.map((c) => c.campaign_status))].sort(),
-    recommended_actions: [...new Set(allCampaigns.map((c) => c.recommended_action))].sort(),
-  }), [allCampaigns]);
+  const options = useMemo(() => {
+    // Cascading: sectors + states filtered by selected org (if any)
+    const orgCampaigns = filters.org
+      ? allCampaigns.filter((c) => c.org_id === filters.org)
+      : allCampaigns;
+    // States further filtered by selected sector
+    const sectorCampaigns = filters.sector
+      ? orgCampaigns.filter((c) => c.sector === filters.sector)
+      : orgCampaigns;
+    return {
+      orgs: [...new Map(allCampaigns.map((c) => [c.org_id, c.org_label])).entries()]
+        .map(([id, label]) => ({ id, label })),
+      sectors: [...new Set(orgCampaigns.map((c) => c.sector))].sort(),
+      states: [...new Set(
+        sectorCampaigns.map((c) => c.state).filter((s) => s && s !== 'Unmapped')
+      )].sort(),
+      campaign_statuses: [...new Set(allCampaigns.map((c) => c.campaign_status))].sort(),
+      recommended_actions: [...new Set(allCampaigns.map((c) => c.recommended_action))].sort(),
+    };
+  }, [allCampaigns, filters.org, filters.sector]);
 
   const updateFilter = useCallback(<K extends keyof FilterState>(key: K, value: FilterState[K]) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
