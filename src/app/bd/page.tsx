@@ -1067,17 +1067,16 @@ function AnalyticsTab({
   }, [emails]);
   const maxMonthTotal = Math.max(...byMonth.map(([, v]) => v.total), 1);
 
-  // Stacked segment colors — order matters (drawn left to right in bar)
-  const SEGMENT_DEFS: Array<{ key: keyof MonthRow; label: string; color: string; textColor: string }> = [
-    { key: 'positive',      label: 'Positive',       color: '#10b981', textColor: 'text-emerald-600' },
-    { key: 'meetings',      label: 'Meeting',         color: '#8b5cf6', textColor: 'text-purple-600' },
-    { key: 'more_info',     label: 'More Info',       color: '#3b82f6', textColor: 'text-blue-600' },
-    { key: 'referral',      label: 'Referral',        color: '#06b6d4', textColor: 'text-cyan-600' },
-    { key: 'neutral',       label: 'Neutral',         color: '#d1d5db', textColor: 'text-gray-400' },
-    { key: 'not_interested',label: 'Not Interested',  color: '#ef4444', textColor: 'text-red-500' },
-    { key: 'unsubscribe',   label: 'Unsubscribe',     color: '#f97316', textColor: 'text-orange-500' },
-    { key: 'ooo',           label: 'OOO',             color: '#e5e7eb', textColor: 'text-gray-300' },
-  ];
+  // 3-bucket grouping for the bar — detail lives in the table below
+  // Engaged (green): worth following up
+  // Neutral (light gray): no clear signal
+  // Negative (muted red): not interested / unsub / OOO
+  function monthBuckets(v: MonthRow) {
+    const engaged  = v.positive + v.meetings + v.more_info + v.referral;
+    const neutral  = v.neutral + v.ooo;
+    const negative = v.not_interested + v.unsubscribe;
+    return { engaged, neutral, negative };
+  }
 
   // ── Top campaigns ──────────────────────────────────────────────────────────
   const topCampaigns = [...campaigns]
@@ -1171,23 +1170,19 @@ function AnalyticsTab({
         </div>
       </div>
 
-      {/* ── Monthly Reply Activity — stacked classification view ─────────────── */}
+      {/* ── Monthly Reply Activity ─────────────────────────────────────────────── */}
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-start justify-between flex-wrap gap-2">
+        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between flex-wrap gap-3">
           <div>
             <span className="text-sm font-semibold text-gray-700">Monthly Reply Activity</span>
             <div className="text-[11px] text-gray-400 mt-0.5">
-              Each bar = 100% of that month's replies. Color shows what kind — more green = better engagement. Vol% compares volume to your busiest month.
+              Each bar = % breakdown of that month's replies. Detail in table below.
             </div>
           </div>
-          {/* Legend */}
-          <div className="flex flex-wrap gap-x-3 gap-y-1">
-            {SEGMENT_DEFS.map((s) => (
-              <span key={s.key} className="flex items-center gap-1 text-[10px] text-gray-500">
-                <span className="w-2.5 h-2.5 rounded-sm inline-block flex-shrink-0" style={{ backgroundColor: s.color }} />
-                {s.label}
-              </span>
-            ))}
+          <div className="flex items-center gap-4 text-[11px] text-gray-500">
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-emerald-400 inline-block" /> Engaged</span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-gray-200 inline-block" /> Neutral / OOO</span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-red-300 inline-block" /> Not interested / Unsub</span>
           </div>
         </div>
 
@@ -1195,55 +1190,36 @@ function AnalyticsTab({
           <div className="text-center py-10 text-sm text-gray-400">No dated email data in current filter</div>
         )}
 
-        <div className="p-4 space-y-2">
+        <div className="px-4 py-3 space-y-2.5">
           {byMonth.map(([monthKey, v]) => {
-            // Normalized bars: each row is 100% wide, segments show % of that month's total.
-            // Volume is shown as text. This way filters never break the bar rendering.
-            const engaged = v.positive + v.meetings + v.more_info + v.referral;
-            const posRate  = v.total > 0 ? (engaged / v.total * 100).toFixed(0) : '0';
-            const unsubPct = v.total > 0 ? (v.unsubscribe / v.total * 100) : 0;
+            const { engaged, neutral, negative } = monthBuckets(v);
+            const engagedPct  = v.total > 0 ? (engaged  / v.total) * 100 : 0;
+            const neutralPct  = v.total > 0 ? (neutral  / v.total) * 100 : 0;
+            const negativePct = v.total > 0 ? (negative / v.total) * 100 : 0;
+            const unsubPct    = v.total > 0 ? (v.unsubscribe / v.total) * 100 : 0;
             const isHighUnsub = unsubPct >= 10;
-            const volumePct = maxMonthTotal > 0 ? (v.total / maxMonthTotal * 100).toFixed(0) : '0';
 
             return (
-              <div key={monthKey} className="flex items-center gap-3 group">
-                {/* Month label */}
-                <div className="text-xs text-gray-600 font-semibold w-14 flex-shrink-0 text-right">
+              <div key={monthKey} className="flex items-center gap-3">
+                <div className="text-xs text-gray-500 font-medium w-14 flex-shrink-0 text-right tabular-nums">
                   {monthToLabel(monthKey)}
                 </div>
 
-                {/* Normalized stacked bar — always full width, segments = % of month total */}
-                <div className="flex-1 h-6 rounded-md overflow-hidden flex bg-gray-100">
-                  {v.total > 0 && SEGMENT_DEFS.map((seg) => {
-                    const count = v[seg.key] as number;
-                    if (!count) return null;
-                    const segPct = (count / v.total) * 100;
-                    return (
-                      <div
-                        key={seg.key}
-                        title={`${seg.label}: ${count} (${segPct.toFixed(0)}%)`}
-                        style={{ width: `${segPct}%`, backgroundColor: seg.color }}
-                        className="h-full"
-                      />
-                    );
-                  })}
+                {/* 3-bucket bar — always full width */}
+                <div className="flex-1 h-5 rounded overflow-hidden flex bg-gray-100">
+                  {engagedPct  > 0 && <div style={{ width: `${engagedPct}%`  }} className="h-full bg-emerald-400" title={`Engaged: ${engaged} (${engagedPct.toFixed(0)}%)`} />}
+                  {neutralPct  > 0 && <div style={{ width: `${neutralPct}%`  }} className="h-full bg-gray-200"   title={`Neutral/OOO: ${neutral} (${neutralPct.toFixed(0)}%)`} />}
+                  {negativePct > 0 && <div style={{ width: `${negativePct}%` }} className="h-full bg-red-200"    title={`Negative: ${negative} (${negativePct.toFixed(0)}%)`} />}
                 </div>
 
-                {/* Metrics: volume, engagement rate, anomaly flags */}
-                <div className="flex items-center gap-2 text-[11px] flex-shrink-0 w-72">
-                  <span className="text-gray-400 tabular-nums" title="Volume as % of busiest month">
-                    {volumePct}% vol
-                  </span>
-                  <span className="text-gray-400">·</span>
-                  <span className="text-gray-600 tabular-nums font-medium">{v.total} replies</span>
-                  <span className="text-gray-400">·</span>
-                  <span className={`font-semibold tabular-nums ${engaged > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
-                    {posRate}% pos
+                {/* Key numbers */}
+                <div className="w-56 flex-shrink-0 flex items-center gap-2 text-[11px]">
+                  <span className="text-gray-400 tabular-nums w-16 text-right">{v.total} replies</span>
+                  <span className={`font-semibold tabular-nums ${engagedPct > 0 ? 'text-emerald-600' : 'text-gray-300'}`}>
+                    {engagedPct.toFixed(0)}% engaged
                   </span>
                   {isHighUnsub && (
-                    <span className="text-orange-600 font-semibold ml-1" title={`${v.unsubscribe} unsubscribes`}>
-                      ⚠ {unsubPct.toFixed(0)}% unsub
-                    </span>
+                    <span className="text-orange-500 font-medium">⚠ {unsubPct.toFixed(0)}% unsub</span>
                   )}
                 </div>
               </div>
