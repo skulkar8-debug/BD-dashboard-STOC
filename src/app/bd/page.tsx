@@ -1067,15 +1067,13 @@ function AnalyticsTab({
   }, [emails]);
   const maxMonthTotal = Math.max(...byMonth.map(([, v]) => v.total), 1);
 
-  // 3-bucket grouping for the bar — detail lives in the table below
-  // Engaged (green): worth following up
-  // Neutral (light gray): no clear signal
-  // Negative (muted red): not interested / unsub / OOO
+  // 4 executive buckets — detail in table below
   function monthBuckets(v: MonthRow) {
-    const engaged  = v.positive + v.meetings + v.more_info + v.referral;
-    const neutral  = v.neutral + v.ooo;
-    const negative = v.not_interested + v.unsubscribe;
-    return { engaged, neutral, negative };
+    const qualified = v.positive + v.meetings + v.more_info + v.referral; // green
+    const neutral   = v.neutral + v.ooo;                                   // gray
+    const negative  = v.not_interested;                                     // red
+    const optout    = v.unsubscribe;                                        // orange
+    return { qualified, neutral, negative, optout };
   }
 
   // ── Top campaigns ──────────────────────────────────────────────────────────
@@ -1172,17 +1170,19 @@ function AnalyticsTab({
 
       {/* ── Monthly Reply Activity ─────────────────────────────────────────────── */}
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+        {/* Header */}
         <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between flex-wrap gap-3">
           <div>
             <span className="text-sm font-semibold text-gray-700">Monthly Reply Activity</span>
             <div className="text-[11px] text-gray-400 mt-0.5">
-              Each bar = % breakdown of that month's replies. Detail in table below.
+              Bar width = reply volume. Color = reply quality. Longer + greener = better month.
             </div>
           </div>
           <div className="flex items-center gap-4 text-[11px] text-gray-500">
-            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-emerald-400 inline-block" /> Engaged</span>
-            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-gray-200 inline-block" /> Neutral / OOO</span>
-            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-red-300 inline-block" /> Not interested / Unsub</span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm inline-block" style={{ backgroundColor: '#34d399' }} /> Qualified</span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-gray-200 inline-block" /> Neutral / Routing</span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm inline-block" style={{ backgroundColor: '#fca5a5' }} /> Negative</span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm inline-block" style={{ backgroundColor: '#fdba74' }} /> Opt-out</span>
           </div>
         </div>
 
@@ -1190,36 +1190,57 @@ function AnalyticsTab({
           <div className="text-center py-10 text-sm text-gray-400">No dated email data in current filter</div>
         )}
 
-        <div className="px-4 py-3 space-y-2.5">
+        <div className="px-4 py-4 space-y-3">
           {byMonth.map(([monthKey, v]) => {
-            const { engaged, neutral, negative } = monthBuckets(v);
-            const engagedPct  = v.total > 0 ? (engaged  / v.total) * 100 : 0;
-            const neutralPct  = v.total > 0 ? (neutral  / v.total) * 100 : 0;
-            const negativePct = v.total > 0 ? (negative / v.total) * 100 : 0;
-            const unsubPct    = v.total > 0 ? (v.unsubscribe / v.total) * 100 : 0;
-            const isHighUnsub = unsubPct >= 10;
+            const { qualified, neutral, negative, optout } = monthBuckets(v);
+            // Segment widths are % of the bar width (which itself = % of track)
+            const qPct  = v.total > 0 ? (qualified / v.total) * 100 : 0;
+            const nPct  = v.total > 0 ? (neutral   / v.total) * 100 : 0;
+            const rPct  = v.total > 0 ? (negative  / v.total) * 100 : 0;
+            const oPct  = v.total > 0 ? (optout    / v.total) * 100 : 0;
+            // Bar width = volume relative to busiest month
+            const barW  = (v.total / maxMonthTotal) * 100;
+            const isHighOptout = oPct >= 10;
 
             return (
               <div key={monthKey} className="flex items-center gap-3">
+                {/* Month label */}
                 <div className="text-xs text-gray-500 font-medium w-14 flex-shrink-0 text-right tabular-nums">
                   {monthToLabel(monthKey)}
                 </div>
 
-                {/* 3-bucket bar — always full width */}
-                <div className="flex-1 h-5 rounded overflow-hidden flex bg-gray-100">
-                  {engagedPct  > 0 && <div style={{ width: `${engagedPct}%`  }} className="h-full bg-emerald-400" title={`Engaged: ${engaged} (${engagedPct.toFixed(0)}%)`} />}
-                  {neutralPct  > 0 && <div style={{ width: `${neutralPct}%`  }} className="h-full bg-gray-200"   title={`Neutral/OOO: ${neutral} (${neutralPct.toFixed(0)}%)`} />}
-                  {negativePct > 0 && <div style={{ width: `${negativePct}%` }} className="h-full bg-red-200"    title={`Negative: ${negative} (${negativePct.toFixed(0)}%)`} />}
+                {/* Track — full width background, colored bar absolutely inside */}
+                <div className="flex-1 relative h-6 bg-gray-100 rounded-md overflow-hidden">
+                  {/* Volume-scaled inner bar with 4 color segments */}
+                  <div className="absolute inset-y-0 left-0 flex h-full" style={{ width: `${barW}%` }}>
+                    {qPct > 0 && (
+                      <div style={{ width: `${qPct}%`, backgroundColor: '#34d399' }} className="h-full"
+                        title={`Qualified: ${qualified} (${qPct.toFixed(0)}%)`} />
+                    )}
+                    {nPct > 0 && (
+                      <div style={{ width: `${nPct}%` }} className="h-full bg-gray-300"
+                        title={`Neutral/Routing: ${neutral} (${nPct.toFixed(0)}%)`} />
+                    )}
+                    {rPct > 0 && (
+                      <div style={{ width: `${rPct}%`, backgroundColor: '#fca5a5' }} className="h-full"
+                        title={`Negative: ${negative} (${rPct.toFixed(0)}%)`} />
+                    )}
+                    {oPct > 0 && (
+                      <div style={{ width: `${oPct}%`, backgroundColor: '#fdba74' }} className="h-full"
+                        title={`Opt-out: ${optout} (${oPct.toFixed(0)}%)`} />
+                    )}
+                  </div>
                 </div>
 
-                {/* Key numbers */}
-                <div className="w-56 flex-shrink-0 flex items-center gap-2 text-[11px]">
-                  <span className="text-gray-400 tabular-nums w-16 text-right">{v.total} replies</span>
-                  <span className={`font-semibold tabular-nums ${engagedPct > 0 ? 'text-emerald-600' : 'text-gray-300'}`}>
-                    {engagedPct.toFixed(0)}% engaged
+                {/* Stats */}
+                <div className="w-60 flex-shrink-0 flex items-center gap-2 text-[11px]">
+                  <span className="text-gray-500 tabular-nums font-medium">{v.total}</span>
+                  <span className="text-gray-300">·</span>
+                  <span className={`font-semibold tabular-nums ${qPct > 0 ? 'text-emerald-600' : 'text-gray-300'}`}>
+                    {qPct.toFixed(0)}% qualified
                   </span>
-                  {isHighUnsub && (
-                    <span className="text-orange-500 font-medium">⚠ {unsubPct.toFixed(0)}% unsub</span>
+                  {isHighOptout && (
+                    <span className="text-orange-500 font-medium tabular-nums">· ⚠ {oPct.toFixed(0)}% opt-out</span>
                   )}
                 </div>
               </div>
