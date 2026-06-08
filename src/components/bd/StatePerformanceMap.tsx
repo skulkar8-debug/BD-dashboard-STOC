@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useMemo, useCallback } from "react";
-import { MapContainer, GeoJSON } from "react-leaflet";
+import { MapContainer, GeoJSON, TileLayer } from "react-leaflet";
 import L from "leaflet";
 import type { Feature, FeatureCollection, Geometry, GeoJsonProperties } from "geojson";
 import type { PathOptions, Layer, LeafletMouseEvent } from "leaflet";
@@ -37,24 +37,24 @@ const COLOR_OPTIONS: { value: ColorMetric; label: string }[] = [
 ];
 
 // Each metric has its own bucket thresholds and color ramp
-// First color = no data / zero — light green (land tone) so states read as "map land"
+// First color = no data / zero — very light transparent so tiles show through clearly
 const METRIC_CONFIG: Record<
   ColorMetric,
   { buckets: number[]; colors: string[]; legendLabels: string[] }
 > = {
   positive: {
     buckets: [0, 3, 9, 19],
-    colors: ["#d4edda", "#bfdbfe", "#60a5fa", "#2563eb", "#1e3a8a"],
+    colors: ["#f0f4f8", "#bfdbfe", "#60a5fa", "#2563eb", "#1e3a8a"],
     legendLabels: ["0", "1–3", "4–9", "10–19", "20+"],
   },
   replies: {
     buckets: [0, 9, 29, 59],
-    colors: ["#d4edda", "#d1fae5", "#6ee7b7", "#059669", "#064e3b"],
+    colors: ["#f0f4f8", "#d1fae5", "#6ee7b7", "#059669", "#064e3b"],
     legendLabels: ["0", "1–9", "10–29", "30–59", "60+"],
   },
   positive_rate: {
     buckets: [0, 10, 24, 39],
-    colors: ["#d4edda", "#fef9c3", "#fde047", "#ca8a04", "#78350f"],
+    colors: ["#f0f4f8", "#fef9c3", "#fde047", "#ca8a04", "#78350f"],
     legendLabels: ["0%", "1–10%", "11–24%", "25–39%", "40%+"],
   },
 };
@@ -169,16 +169,18 @@ const GEOJSON_URL =
   "https://raw.githubusercontent.com/PublicaMundi/MappingAPI/master/data/geojson/us-states.json";
 
 const DEFAULT_STYLE: PathOptions = {
-  weight: 0.8,
+  weight: 1.5,
   opacity: 1,
-  color: "#ffffff",   // white borders — clean separation against ocean background
-  fillOpacity: 0.88,
+  color: "#ffffff",     // white borders like the Leaflet choropleth example
+  dashArray: "3",       // dashed border — classic choropleth look
+  fillOpacity: 0.72,    // semi-transparent so tile map shows through
 };
 
 const HOVER_STYLE: PathOptions = {
-  weight: 2.5,
-  color: "#1e3a8a",   // deep blue — clear highlight on hover
-  fillOpacity: 0.96,
+  weight: 3,
+  color: "#555",
+  dashArray: "",        // solid on hover for clear highlight
+  fillOpacity: 0.85,
 };
 
 export default function StatePerformanceMap({ campaigns, emails }: Props) {
@@ -339,9 +341,15 @@ export default function StatePerformanceMap({ campaigns, emails }: Props) {
             boxZoom={false}
             keyboard={false}
             touchZoom={false}
-            attributionControl={false}
-            style={{ height: "100%", width: "100%", background: "#a8cce0" }}
+            attributionControl={true}
+            style={{ height: "100%", width: "100%" }}
           >
+            {/* CartoDB Voyager tiles — colorful, clean, blue ocean, labeled cities */}
+            <TileLayer
+              url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+            />
+            {/* Choropleth states on top */}
             <GeoJSON
               key={dataKey}
               data={geoData}
