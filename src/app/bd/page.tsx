@@ -1177,7 +1177,7 @@ function AnalyticsTab({
           <div>
             <span className="text-sm font-semibold text-gray-700">Monthly Reply Activity</span>
             <div className="text-[11px] text-gray-400 mt-0.5">
-              Bar width = total volume that month. Color breakdown shows reply quality — spot high unsubscribe (orange) or low positive (no green) months instantly.
+              Each bar = 100% of that month's replies. Color shows what kind — more green = better engagement. Vol% compares volume to your busiest month.
             </div>
           </div>
           {/* Legend */}
@@ -1197,11 +1197,13 @@ function AnalyticsTab({
 
         <div className="p-4 space-y-2">
           {byMonth.map(([monthKey, v]) => {
-            const barW = (v.total / maxMonthTotal) * 100;
-            const posRate = v.total > 0 ? ((v.positive + v.meetings + v.more_info + v.referral) / v.total * 100).toFixed(0) : '0';
-            const unsubRate = v.total > 0 ? (v.unsubscribe / v.total * 100).toFixed(0) : '0';
-            const isHighUnsub = v.unsubscribe > 0 && parseInt(unsubRate) >= 10;
-            const isLowEngage = v.total >= 5 && parseInt(posRate) < 5;
+            // Normalized bars: each row is 100% wide, segments show % of that month's total.
+            // Volume is shown as text. This way filters never break the bar rendering.
+            const engaged = v.positive + v.meetings + v.more_info + v.referral;
+            const posRate  = v.total > 0 ? (engaged / v.total * 100).toFixed(0) : '0';
+            const unsubPct = v.total > 0 ? (v.unsubscribe / v.total * 100) : 0;
+            const isHighUnsub = unsubPct >= 10;
+            const volumePct = maxMonthTotal > 0 ? (v.total / maxMonthTotal * 100).toFixed(0) : '0';
 
             return (
               <div key={monthKey} className="flex items-center gap-3 group">
@@ -1210,33 +1212,38 @@ function AnalyticsTab({
                   {monthToLabel(monthKey)}
                 </div>
 
-                {/* Stacked bar */}
-                <div className="flex-1 h-6 bg-gray-100 rounded-md overflow-hidden flex" style={{ maxWidth: `${barW}%`, minWidth: v.total > 0 ? '4px' : 0, width: '100%' }}>
-                  {SEGMENT_DEFS.map((seg) => {
+                {/* Normalized stacked bar — always full width, segments = % of month total */}
+                <div className="flex-1 h-6 rounded-md overflow-hidden flex bg-gray-100">
+                  {v.total > 0 && SEGMENT_DEFS.map((seg) => {
                     const count = v[seg.key] as number;
                     if (!count) return null;
-                    const segW = (count / v.total) * 100;
+                    const segPct = (count / v.total) * 100;
                     return (
                       <div
                         key={seg.key}
-                        title={`${seg.label}: ${count}`}
-                        style={{ width: `${segW}%`, backgroundColor: seg.color, minWidth: 2 }}
-                        className="h-full transition-opacity group-hover:opacity-90"
+                        title={`${seg.label}: ${count} (${segPct.toFixed(0)}%)`}
+                        style={{ width: `${segPct}%`, backgroundColor: seg.color }}
+                        className="h-full"
                       />
                     );
                   })}
                 </div>
 
-                {/* Metrics */}
-                <div className="flex items-center gap-3 text-[11px] flex-shrink-0 w-64">
-                  <span className="text-gray-500 w-16 text-right tabular-nums">{v.total} replies</span>
-                  <span className="text-emerald-600 font-semibold tabular-nums">{v.positive + v.meetings + v.more_info + v.referral} pos.</span>
-                  <span className="text-gray-400 tabular-nums">{posRate}%</span>
+                {/* Metrics: volume, engagement rate, anomaly flags */}
+                <div className="flex items-center gap-2 text-[11px] flex-shrink-0 w-72">
+                  <span className="text-gray-400 tabular-nums" title="Volume as % of busiest month">
+                    {volumePct}% vol
+                  </span>
+                  <span className="text-gray-400">·</span>
+                  <span className="text-gray-600 tabular-nums font-medium">{v.total} replies</span>
+                  <span className="text-gray-400">·</span>
+                  <span className={`font-semibold tabular-nums ${engaged > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
+                    {posRate}% pos
+                  </span>
                   {isHighUnsub && (
-                    <span className="text-orange-600 font-semibold" title={`${v.unsubscribe} unsubscribes`}>⚠ {unsubRate}% unsub</span>
-                  )}
-                  {isLowEngage && !isHighUnsub && (
-                    <span className="text-gray-400 text-[10px]">low engagement</span>
+                    <span className="text-orange-600 font-semibold ml-1" title={`${v.unsubscribe} unsubscribes`}>
+                      ⚠ {unsubPct.toFixed(0)}% unsub
+                    </span>
                   )}
                 </div>
               </div>
@@ -1290,7 +1297,7 @@ function AnalyticsTab({
         )}
 
         <div className="px-4 py-2 text-[10px] text-amber-600 border-t border-gray-100 bg-amber-50/50">
-          ⚠ Bounce &amp; unsubscribe counts in this table come from the Instantly email classifications, not campaign analytics (which are all-time only and not date-filterable). Use the Campaigns tab for all-time bounce/unsub rates per campaign.
+          ⚠ "Unsub" counts here are from email reply classification (Instantly's received emails). Campaign-level bounce/unsub rates (all-time) are visible in the Sectors drill-down view.
         </div>
       </div>
 
