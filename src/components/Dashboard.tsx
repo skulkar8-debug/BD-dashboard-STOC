@@ -39,8 +39,13 @@ export function Dashboard() {
       const from = format(r.from, "yyyy-MM-dd");
       const to = format(r.to, "yyyy-MM-dd");
       const res = await fetch(`/api/pipeline?from=${from}&to=${to}`);
-      if (!res.ok) throw new Error("Failed to load data");
       const json = await res.json();
+      if (!res.ok) {
+        if (json.error === "not_authenticated" && json.loginUrl) {
+          throw new Error(`Sign in with Google to load pipeline data. Visit ${json.loginUrl}`);
+        }
+        throw new Error(json.message ?? "Failed to load data");
+      }
       setRows(json.rows ?? []);
       setSelectedStatuses(new Set()); // reset filter on new fetch
     } catch (e: any) {

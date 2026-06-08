@@ -83,7 +83,21 @@ export function useStore() {
   // Calendar is always derived from sectors — no manual add needed
 
   // ── Data + TIP ────────────────────────────────────────────────────────────
-  const updateDataTip = useCallback((u: DataTipItem) => save({ ...base, dataTip: base.dataTip.map(t => t.sector === u.sector ? u : t) }), [base, save])
+  const updateDataTip = useCallback((u: DataTipItem) => {
+    setBase(prev => {
+      const next = { ...prev, dataTip: prev.dataTip.map(t => t.sector === u.sector ? u : t) }
+      persistData(next)
+      return next
+    })
+  }, [])
+
+  const replaceDataTip = useCallback((items: DataTipItem[]) => {
+    setBase(prev => {
+      const next = { ...prev, dataTip: items }
+      persistData(next)
+      return next
+    })
+  }, [])
 
   // ── Reset / Export ─────────────────────────────────────────────────────────
   const resetToSeed = useCallback(() => {
@@ -105,7 +119,7 @@ export function useStore() {
     data,
     addSector, updateSector,
     addReminder, updateReminder, deleteReminder,
-    updateDataTip,
+    updateDataTip, replaceDataTip,
     resetToSeed, exportJson,
   }
 }
