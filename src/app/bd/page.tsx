@@ -66,6 +66,47 @@ function CsvBtn({ onClick }: { onClick: () => void }) {
   );
 }
 
+// ─── Scope-aware rate display ─────────────────────────────────────────────────
+// Instantly analytics fields (sent, bounces, etc.) are always all-time totals.
+// Email pull counts respect UI filters. When scopes differ, hide the percentage.
+
+const SCOPE_MISMATCH_TITLE =
+  'Percentage hidden — denominator (sent) is all-time from Instantly analytics; numerator is date/filter-scoped. Scopes do not match.';
+const SCOPE_APPROX_TITLE =
+  'Approximate — sent count is all-time from Instantly analytics. Email pull may not cover full campaign history.';
+
+/** Render a reply-rate where denominator is lifetime `sent` and numerator is filtered replies. */
+function ScopedRate({
+  num, den, isFiltered, className,
+}: {
+  num: number;
+  den: number;
+  isFiltered: boolean;
+  className?: string;
+}) {
+  if (!den) return <span className={className}>—</span>;
+  if (isFiltered) {
+    return (
+      <span className={className ?? ''} title={SCOPE_MISMATCH_TITLE}>
+        <span className="text-gray-300 cursor-help">—</span>
+        <sup className="text-gray-300 text-[8px] ml-px cursor-help" aria-label="scope mismatch">†</sup>
+      </span>
+    );
+  }
+  return (
+    <span className={className} title={SCOPE_APPROX_TITLE}>
+      ~{pct(num, den)}
+    </span>
+  );
+}
+
+/** Plain string version for non-JSX contexts (e.g. sub-labels). */
+function lifetimePct(num: number, den: number, isFiltered: boolean, decimals = 1): string {
+  if (!den) return '—';
+  if (isFiltered) return '—';
+  return '~' + pct(num, den, decimals);
+}
+
 // ─── Compact stat cell ────────────────────────────────────────────────────────
 
 function Stat({ label, value, sub, color }: { label: string; value: string | number; sub?: string; color?: string }) {
@@ -118,9 +159,12 @@ function FilterDebugBar({
           Active: {activeFilters.join(' · ')}
         </span>
       )}
+      <span className="text-gray-400" title="Sent † columns use all-time data from Instantly analytics. Reply% † hides when filters are active because the denominator scope doesn't match the numerator.">
+        † = all-time denominator
+      </span>
       {analyticsDateNote && (
         <span className="text-amber-500">
-          ⚠ Sent/Bounce/Opps are all-time per campaign — Instantly analytics are not date-filtered
+          ⚠ Sent/Bounce/Opps are all-time — Instantly analytics are not date-filterable. Reply% hidden when filters active.
         </span>
       )}
     </div>
@@ -130,12 +174,13 @@ function FilterDebugBar({
 // ─── Overview ─────────────────────────────────────────────────────────────────
 
 function OverviewTab({
-  campaigns, emails, stats, analyticsAvailable,
+  campaigns, emails, stats, analyticsAvailable, isFiltered,
 }: {
   campaigns: NormalizedCampaign[];
   emails: NormalizedEmail[];
   stats: ReturnType<typeof useBDData>['stats'];
   analyticsAvailable: boolean;
+  isFiltered: boolean;
 }) {
   const positive = emails.filter((e) => e.is_positive);
   const noAnalytics = !analyticsAvailable;
@@ -217,20 +262,24 @@ function OverviewTab({
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-4 text-center shadow-sm">
           <div className="text-2xl font-bold tabular-nums text-gray-900">{fmt(stats.replies)}</div>
-          <div className="text-[11px] text-gray-500 mt-0.5">Replies</div>
-          <div className="text-[10px] text-gray-400">{noAnalytics ? 'date-filtered' : pct(stats.replies, stats.sent) + ' rate'}</div>
+          <div className="text-[11px] text-gray-500 mt-0.5">Replies (Date-Filtered)</div>
+          <div className="text-[10px] text-gray-400">
+            {noAnalytics
+              ? 'filtered'
+              : <ScopedRate num={stats.replies} den={stats.sent} isFiltered={isFiltered} />}
+          </div>
         </div>
         <div className="bg-white border border-l-4 border-emerald-400 rounded-xl p-4 text-center shadow-sm">
           <div className="text-2xl font-bold tabular-nums text-emerald-600">{fmt(stats.positive)}</div>
-          <div className="text-[11px] text-gray-500 mt-0.5">Positive Replies</div>
-          <div className="text-[10px] text-gray-400">{pct(stats.positive, stats.replies)} of replies</div>
+          <div className="text-[11px] text-gray-500 mt-0.5">Actionable Replies</div>
+          <div className="text-[10px] text-gray-400">{pct(stats.positive, stats.replies)} of filtered replies</div>
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-4 text-center shadow-sm">
           <div className={`text-2xl font-bold tabular-nums ${noAnalytics ? 'text-gray-300' : 'text-amber-600'}`}>
             {noAnalytics ? '—' : fmt(stats.opps)}
           </div>
-          <div className="text-[11px] text-gray-500 mt-0.5">Opportunities — Only All-Time Data Available</div>
-          {!noAnalytics && <div className="text-[10px] text-gray-400">{pct(stats.opps, stats.sent)} rate</div>}
+          <div className="text-[11px] text-gray-500 mt-0.5">Opportunities (All-Time)</div>
+          {!noAnalytics && <div className="text-[10px] text-gray-400">{pct(stats.opps, stats.sent)} of all-time sent</div>}
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-4 text-center shadow-sm">
           <div className="text-2xl font-bold tabular-nums text-blue-600">{stats.activeCampaigns}</div>
@@ -360,7 +409,7 @@ function OverviewTab({
 
 // ─── Weekly Agenda ────────────────────────────────────────────────────────────
 
-function AgendaTab({ campaigns, emails }: { campaigns: NormalizedCampaign[]; emails: NormalizedEmail[] }) {
+function AgendaTab({ campaigns, emails, isFiltered }: { campaigns: NormalizedCampaign[]; emails: NormalizedEmail[]; isFiltered: boolean }) {
   type GroupData = { campaigns: NormalizedCampaign[]; emails: NormalizedEmail[]; positive: NormalizedEmail[] };
 
   const groups = useMemo(() => {
@@ -431,10 +480,10 @@ function AgendaTab({ campaigns, emails }: { campaigns: NormalizedCampaign[]; ema
                       {/* Stats row */}
                       <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
                         {[
-                          { v: fmt(sent), l: 'Sent' },
-                          { v: fmt(data.emails.length), l: 'Replies' },
-                          { v: fmt(data.positive.length), l: 'Positive', em: true },
-                          { v: pct(data.emails.length, sent), l: 'Reply Rate' },
+                          { v: fmt(sent), l: 'Sent (All-Time)' },
+                          { v: fmt(data.emails.length), l: 'Replies (Filtered)' },
+                          { v: fmt(data.positive.length), l: 'Actionable', em: true },
+                          { v: lifetimePct(data.emails.length, sent, isFiltered), l: 'Reply Rate†' },
                           { v: pct(data.positive.length, data.emails.length), l: 'Pos. Rate' },
                           { v: fmt(data.campaigns.reduce((s, c) => s + c.opportunities, 0)), l: 'Opps' },
                         ].map(({ v, l, em }) => (
@@ -516,7 +565,7 @@ function AgendaTab({ campaigns, emails }: { campaigns: NormalizedCampaign[]; ema
 
 // ─── Sectors ──────────────────────────────────────────────────────────────────
 
-function SectorsTab({ campaigns, emails }: { campaigns: NormalizedCampaign[]; emails: NormalizedEmail[] }) {
+function SectorsTab({ campaigns, emails, isFiltered }: { campaigns: NormalizedCampaign[]; emails: NormalizedEmail[]; isFiltered: boolean }) {
   const [drill, setDrill] = useState<string | null>(null);
   const bySector = useMemo(() => {
     const m = new Map<string, { campaigns: NormalizedCampaign[]; emails: NormalizedEmail[] }>();
@@ -534,13 +583,13 @@ function SectorsTab({ campaigns, emails }: { campaigns: NormalizedCampaign[]; em
         <button onClick={() => setDrill(null)} className="text-sm text-blue-500 hover:underline">← Sectors</button>
         <h2 className="text-xl font-bold">{drill}</h2>
         <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
-          <KpiCard title="Sent" value={fmt(sent)} />
-          <KpiCard title="Replies" value={fmt(d.emails.length)} sub={pct(d.emails.length, sent)} />
-          <KpiCard title="Positive" value={fmt(pos.length)} sub={pct(pos.length, d.emails.length)} accent="#10B981" />
+          <KpiCard title="Sent (All-Time)" value={fmt(sent)} />
+          <KpiCard title="Replies (Filtered)" value={fmt(d.emails.length)} sub={lifetimePct(d.emails.length, sent, isFiltered)} />
+          <KpiCard title="Actionable" value={fmt(pos.length)} sub={pct(pos.length, d.emails.length)} accent="#10B981" />
           <KpiCard title="Opportunities" value={fmt(d.campaigns.reduce((s, c) => s + c.opportunities, 0))} />
           <KpiCard title="Campaigns" value={d.campaigns.length} />
         </div>
-        <CampaignTable campaigns={d.campaigns} emails={d.emails} />
+        <CampaignTable campaigns={d.campaigns} emails={d.emails} isFiltered={isFiltered} />
         {pos.length > 0 && <><div className="text-sm font-semibold text-gray-600">Positive Replies</div><EmailList emails={pos} /></>}
       </div>
     );
@@ -551,8 +600,9 @@ function SectorsTab({ campaigns, emails }: { campaigns: NormalizedCampaign[]; em
     <div className="rounded-xl border border-gray-200 overflow-hidden">
       <table className="w-full text-sm">
         <thead><tr className="bg-gray-50 border-b border-gray-200 text-xs text-gray-400 uppercase tracking-wide">
-          {['Sector','Campaigns','States','Sent','Replies','Reply%','Positive','Pos%','Opps'].map((h) => (
-            <th key={h} className={`py-2 px-3 ${h==='Sector'?'text-left':'text-right'}`}>{h}</th>
+          {['Sector','Campaigns','States','Sent †','Replies','Reply% †','Positive','Pos%','Opps'].map((h) => (
+            <th key={h} title={h.includes('†') ? 'Denominator is all-time sent from Instantly analytics' : undefined}
+              className={`py-2 px-3 ${h==='Sector'?'text-left':'text-right'}`}>{h}</th>
           ))}
         </tr></thead>
         <tbody>
@@ -566,7 +616,7 @@ function SectorsTab({ campaigns, emails }: { campaigns: NormalizedCampaign[]; em
                 <td className="text-right px-3">{new Set(d.campaigns.map((c) => c.state)).size}</td>
                 <td className="text-right px-3">{fmt(sent)}</td>
                 <td className="text-right px-3">{d.emails.length}</td>
-                <td className="text-right px-3">{pct(d.emails.length, sent)}</td>
+                <td className="text-right px-3"><ScopedRate num={d.emails.length} den={sent} isFiltered={isFiltered} /></td>
                 <td className="text-right px-3 text-emerald-600 font-semibold">{pos}</td>
                 <td className="text-right px-3">{pct(pos, d.emails.length)}</td>
                 <td className="text-right px-3">{d.campaigns.reduce((s, c) => s + c.opportunities, 0)}</td>
@@ -581,7 +631,7 @@ function SectorsTab({ campaigns, emails }: { campaigns: NormalizedCampaign[]; em
 
 // ─── States ───────────────────────────────────────────────────────────────────
 
-function StatesTab({ campaigns, emails }: { campaigns: NormalizedCampaign[]; emails: NormalizedEmail[] }) {
+function StatesTab({ campaigns, emails, isFiltered }: { campaigns: NormalizedCampaign[]; emails: NormalizedEmail[]; isFiltered: boolean }) {
   const rows = useMemo(() => {
     const m = new Map<string, { campaigns: NormalizedCampaign[]; emails: NormalizedEmail[] }>();
     campaigns.forEach((c) => {
@@ -614,8 +664,9 @@ function StatesTab({ campaigns, emails }: { campaigns: NormalizedCampaign[]; ema
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200 text-xs text-gray-400 uppercase tracking-wide">
-                {['State','Orgs','Sectors','Campaigns','Sent','Replies','Reply%','Positive','Pos%','Opps'].map((h) => (
-                  <th key={h} className={`py-2 px-3 ${h === 'State' ? 'text-left' : 'text-right'}`}>{h}</th>
+                {['State','Orgs','Sectors','Campaigns','Sent †','Replies','Reply% †','Positive','Pos%','Opps'].map((h) => (
+                  <th key={h} title={h.includes('†') ? 'Denominator is all-time sent from Instantly analytics' : undefined}
+                    className={`py-2 px-3 ${h === 'State' ? 'text-left' : 'text-right'}`}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -631,7 +682,7 @@ function StatesTab({ campaigns, emails }: { campaigns: NormalizedCampaign[]; ema
                     <td className="text-right px-3">{d.campaigns.length}</td>
                     <td className="text-right px-3">{fmt(sent)}</td>
                     <td className="text-right px-3">{d.emails.length}</td>
-                    <td className="text-right px-3">{pct(d.emails.length, sent)}</td>
+                    <td className="text-right px-3"><ScopedRate num={d.emails.length} den={sent} isFiltered={isFiltered} /></td>
                     <td className="text-right px-3 text-emerald-600 font-semibold">{pos}</td>
                     <td className="text-right px-3">{pct(pos, d.emails.length)}</td>
                     <td className="text-right px-3">{d.campaigns.reduce((s, c) => s + c.opportunities, 0)}</td>
@@ -648,7 +699,7 @@ function StatesTab({ campaigns, emails }: { campaigns: NormalizedCampaign[]; ema
 
 // ─── Campaign table ───────────────────────────────────────────────────────────
 
-function CampaignTable({ campaigns, emails: _ }: { campaigns: NormalizedCampaign[]; emails: NormalizedEmail[] }) {
+function CampaignTable({ campaigns, emails: _, isFiltered }: { campaigns: NormalizedCampaign[]; emails: NormalizedEmail[]; isFiltered: boolean }) {
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<{ col: keyof NormalizedCampaign; dir: 'asc' | 'desc' }>({ col: 'sent', dir: 'desc' });
 
@@ -690,9 +741,9 @@ function CampaignTable({ campaigns, emails: _ }: { campaigns: NormalizedCampaign
             <th className="text-left py-2 px-2">State</th>
             <th className="text-left py-2 px-2">Campaign</th>
             <th className="text-left py-2 px-2">Status</th>
-            <Th col="sent" label="Sent" />
+            <Th col="sent" label="Sent †" />
             <Th col="actual_received_count" label="Replies" />
-            <Th col="reply_rate" label="Reply%" />
+            <Th col="reply_rate" label="Reply% †" />
             <Th col="positive_reply_count" label="Positive" />
             <Th col="positive_reply_rate" label="Pos%" />
             <Th col="bounces" label="Bounces" />
@@ -711,7 +762,11 @@ function CampaignTable({ campaigns, emails: _ }: { campaigns: NormalizedCampaign
                 <td className="px-2"><StatusBadge value={c.campaign_status} /></td>
                 <td className="text-right px-2">{c.analytics_available ? fmt(c.sent) : <span className="text-gray-300">—</span>}</td>
                 <td className="text-right px-2">{c.actual_received_count}</td>
-                <td className="text-right px-2">{c.analytics_available && c.sent > 0 ? c.reply_rate + '%' : '—'}</td>
+                <td className="text-right px-2">
+                  {c.analytics_available && c.sent > 0
+                    ? <ScopedRate num={c.actual_received_count} den={c.sent} isFiltered={isFiltered} />
+                    : '—'}
+                </td>
                 <td className="text-right px-2 text-emerald-600 font-semibold">{c.positive_reply_count}</td>
                 <td className="text-right px-2">{c.actual_received_count > 0 ? c.positive_reply_rate + '%' : '—'}</td>
                 <td className={`text-right px-2 ${c.bounce_rate > 5 ? 'text-red-600 font-semibold' : ''}`}>{c.analytics_available ? c.bounces : '—'}</td>
@@ -1476,6 +1531,17 @@ export default function BDDashboard() {
   const [tab, setTab] = useState<TabId>('overview');
   const bd = useBDData();
 
+  // True when any UI filter is active — reply counts are scoped, sent is lifetime.
+  // In this state, sent-denominator rates (reply%, open%) would be misleading.
+  const isFiltered =
+    bd.filters.datePreset !== 'all' ||
+    !!bd.filters.org ||
+    !!bd.filters.sector ||
+    !!bd.filters.state ||
+    !!bd.filters.campaign_status ||
+    !!bd.filters.has_positive_replies ||
+    !!bd.filters.recommended_action;
+
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-200 sticky top-0 z-20 shadow-sm">
@@ -1541,9 +1607,9 @@ export default function BDDashboard() {
           </div>
         ) : !bd.data ? null : (
           <>
-            {tab === 'overview'  && <OverviewTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} stats={bd.stats} analyticsAvailable={bd.stats.analyticsAvailable} />}
-            {tab === 'sectors'   && <SectorsTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} />}
-            {tab === 'states'    && <StatesTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} />}
+            {tab === 'overview'  && <OverviewTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} stats={bd.stats} analyticsAvailable={bd.stats.analyticsAvailable} isFiltered={isFiltered} />}
+            {tab === 'sectors'   && <SectorsTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} isFiltered={isFiltered} />}
+            {tab === 'states'    && <StatesTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} isFiltered={isFiltered} />}
             {tab === 'inbox'     && <InboxTab emails={bd.filteredEmails} />}
             {tab === 'analytics' && <AnalyticsTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} />}
             {tab === 'debug'     && <DebugTab data={bd.data} />}
