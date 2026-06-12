@@ -37,7 +37,55 @@ function stripQuotedContent(text: string): string {
 }
 
 // ─── Pattern sets ─────────────────────────────────────────────────────────────
-// Order: OOO → Unsubscribe → NOT_INTERESTED → Meeting → Referral → More Info → Positive → Neutral
+// Priority order (first match wins):
+//   Bounce → Auto-reply → OOO → Unsubscribe → NOT_INTERESTED
+//   → Meeting → Referral → More Info → Positive → Neutral
+
+// Delivery failures / mailer-daemon — check FIRST (distinctive headers)
+const BOUNCE_PATTERNS = [
+  /mailer.daemon/i,
+  /postmaster@/i,
+  /delivery (status notification|failed|failure|report)/i,
+  /mail delivery (failed|subsystem|error)/i,
+  /\bundeliverable\b/i,
+  /message not delivered/i,
+  /delivery has failed/i,
+  /failed to deliver/i,
+  /this is an automatically generated deliver/i,
+  /permanent (error|failure).*user (unknown|not found)/i,
+  /550.*(no such user|user unknown|mailbox not found)/i,
+  /\baddress not found\b/i,
+  /\bemail address.*does not exist\b/i,
+  /\bno such (user|address|account)\b/i,
+  /\binvalid (email|address|mailbox)\b/i,
+  /recipient address rejected/i,
+];
+
+// System / automated replies — not a human, not OOO
+const AUTO_REPLY_PATTERNS = [
+  /inbox (is )?not monitored/i,
+  /mailbox (is )?not monitored/i,
+  /(this |the )?(email|mailbox|address|email address) is not monitored/i,
+  /please do not (reply|respond) to this (email|message|address)/i,
+  /do not (reply|respond) to this (email|message|address|notification)/i,
+  /this (is |was )?an? (automated|automatic|system) (email|message|notification|response)/i,
+  /unusual (level|volume|amount) of (activity|email|emails|messages)/i,
+  // Security / challenge responses
+  /\bchallenge.response\b/i,
+  /(this is a )?(security |email )?(challenge|verification) (email|message|response)/i,
+  /verify (you are|that you are|your email|your identity)/i,
+  /confirm (you are|that you are|your identity|your humanity)/i,
+  /prove (you are|that you are) (human|a person)/i,
+  // "No longer with the company" — not a personal not-interested
+  /no longer (with|at) (the company|our company|this (company|organization|org|firm))/i,
+  /has left (the company|our (company|organization|team|firm))/i,
+  /no longer (an employee|employed here|works here)/i,
+  /(has|have) (left|departed) (the company|our (company|organization|team))/i,
+  /this (person|employee|individual) is no longer/i,
+  // Generic "this email is no longer active/valid"
+  /this (email|address) is no longer (valid|active|in use|monitored)/i,
+  /email address is (inactive|no longer active|no longer valid)/i,
+];
 
 const OOO_PATTERNS = [
   /out of office/i,
@@ -185,14 +233,17 @@ function classifyFromText(rawText: string): ReplyClassification {
   const text = stripQuotedContent(rawText);
   if (!text || text.trim().length < 3) return 'neutral_needs_review';
 
-  if (match(text, OOO_PATTERNS))          return 'out_of_office';
-  if (match(text, UNSUBSCRIBE_PATTERNS))  return 'unsubscribe';
+  // System/automated detection first — these are never human replies
+  if (match(text, BOUNCE_PATTERNS))        return 'bounce';
+  if (match(text, AUTO_REPLY_PATTERNS))    return 'auto_reply';
+  if (match(text, OOO_PATTERNS))           return 'out_of_office';
+  if (match(text, UNSUBSCRIBE_PATTERNS))   return 'unsubscribe';
   // NOT interested BEFORE positive — avoids "not interested" matching positive patterns
   if (match(text, NOT_INTERESTED_PATTERNS)) return 'not_interested';
-  if (match(text, MEETING_PATTERNS))      return 'meeting_requested';
-  if (match(text, REFERRAL_PATTERNS))     return 'referral_given';
-  if (match(text, MORE_INFO_PATTERNS))    return 'more_info_requested';
-  if (match(text, POSITIVE_PATTERNS))     return 'positive_interested';
+  if (match(text, MEETING_PATTERNS))       return 'meeting_requested';
+  if (match(text, REFERRAL_PATTERNS))      return 'referral_given';
+  if (match(text, MORE_INFO_PATTERNS))     return 'more_info_requested';
+  if (match(text, POSITIVE_PATTERNS))      return 'positive_interested';
 
   return 'neutral_needs_review';
 }
@@ -229,34 +280,39 @@ export function classifyEmail(email: InstantlyEmail): ReplyClassification {
   if (email.ai_interest_value != null) {
 
     if (email.ai_interest_value >= 2) {
-      // AI says positive — but text overrides for clear negatives
-      if (textClass === 'out_of_office')    return 'out_of_office';
-      if (textClass === 'unsubscribe')      return 'unsubscribe';
-      if (textClass === 'not_interested')   return 'not_interested';
-      if (textClass === 'meeting_requested') return 'meeting_requested';
-      if (textClass === 'referral_given')   return 'referral_given';
+      // AI says positive — but automated/system replies and clear negatives always win
+      if (textClass === 'bounce')          return 'bounce';
+      if (textClass === 'auto_reply')      return 'auto_reply';
+      if (textClass === 'out_of_office')   return 'out_of_office';
+      if (textClass === 'unsubscribe')     return 'unsubscribe';
+      if (textClass === 'not_interested')  return 'not_interested';
+      if (textClass === 'meeting_requested')   return 'meeting_requested';
+      if (textClass === 'referral_given')      return 'referral_given';
       if (textClass === 'more_info_requested') return 'more_info_requested';
       return 'positive_interested';
     }
 
     if (email.ai_interest_value === 1) {
       // Mild AI interest — only upgrade if text confirms a clear positive signal
-      if (textClass === 'out_of_office')    return 'out_of_office';
-      if (textClass === 'unsubscribe')      return 'unsubscribe';
-      if (textClass === 'not_interested')   return 'not_interested';
-      if (textClass === 'meeting_requested') return 'meeting_requested';
-      if (textClass === 'referral_given')   return 'referral_given';
+      if (textClass === 'bounce')          return 'bounce';
+      if (textClass === 'auto_reply')      return 'auto_reply';
+      if (textClass === 'out_of_office')   return 'out_of_office';
+      if (textClass === 'unsubscribe')     return 'unsubscribe';
+      if (textClass === 'not_interested')  return 'not_interested';
+      if (textClass === 'meeting_requested')   return 'meeting_requested';
+      if (textClass === 'referral_given')      return 'referral_given';
       if (textClass === 'more_info_requested') return 'more_info_requested';
       if (textClass === 'positive_interested') return 'positive_interested';
       return 'neutral_needs_review';
     }
 
     if (email.ai_interest_value === -1) {
-      // Instantly says NEGATIVE — only override for genuine referrals or OOO.
-      // NEVER override to meeting_requested: if AI says -1, it's not a meeting.
-      if (textClass === 'referral_given')  return 'referral_given';
-      if (textClass === 'out_of_office')   return 'out_of_office';
-      if (textClass === 'unsubscribe')     return 'unsubscribe';
+      // Instantly says NEGATIVE — automated signals and referrals override; everything else → not_interested
+      if (textClass === 'bounce')         return 'bounce';
+      if (textClass === 'auto_reply')     return 'auto_reply';
+      if (textClass === 'out_of_office')  return 'out_of_office';
+      if (textClass === 'unsubscribe')    return 'unsubscribe';
+      if (textClass === 'referral_given') return 'referral_given';
       return 'not_interested';
     }
 

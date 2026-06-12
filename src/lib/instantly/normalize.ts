@@ -296,6 +296,7 @@ export function normalizeEmail(
     lead_id: email.lead ?? '',
     thread_id: email.thread_id ?? '',
     is_auto_reply:
+      original_classification === 'bounce' ||
       original_classification === 'auto_reply' ||
       original_classification === 'out_of_office',
     ai_interest_value: email.ai_interest_value ?? null,

@@ -84,16 +84,20 @@ export type OrgConfig = {
 // ─── Reply classification ────────────────────────────────────────────────────
 
 export type ReplyClassification =
+  // ── Positive (worth following up) ─────────────────────────────────────────
   | 'positive_interested'
   | 'meeting_requested'
   | 'referral_given'
   | 'more_info_requested'
+  // ── Human non-positive ─────────────────────────────────────────────────────
   | 'neutral_needs_review'
   | 'not_interested'
-  | 'out_of_office'
-  | 'unsubscribe'
   | 'negative_complaint'
-  | 'auto_reply';
+  // ── Automated / system (excluded from positive count) ─────────────────────
+  | 'out_of_office'       // genuine OOO / vacation autoresponder
+  | 'auto_reply'          // inbox not monitored, unusual activity, security challenge, left company
+  | 'bounce'              // mailer-daemon, postmaster, delivery failed, undeliverable
+  | 'unsubscribe';        // opt-out request
 
 export const POSITIVE_CLASSIFICATIONS: ReplyClassification[] = [
   'positive_interested',
@@ -103,29 +107,31 @@ export const POSITIVE_CLASSIFICATIONS: ReplyClassification[] = [
 ];
 
 export const CLASSIFICATION_LABELS: Record<ReplyClassification, string> = {
-  positive_interested: 'Positive / Interested',
-  meeting_requested: 'Meeting Requested',
-  referral_given: 'Referral / Correct Contact Given',
-  more_info_requested: 'More Info Requested',
+  positive_interested:  'Positive / Interested',
+  meeting_requested:    'Meeting Requested',
+  referral_given:       'Referral / Correct Contact Given',
+  more_info_requested:  'More Info Requested',
   neutral_needs_review: 'Neutral / Needs Review',
-  not_interested: 'Not Interested',
-  out_of_office: 'Out of Office',
-  unsubscribe: 'Unsubscribe',
-  negative_complaint: 'Negative / Complaint',
-  auto_reply: 'Auto Reply',
+  not_interested:       'Not Interested',
+  negative_complaint:   'Negative / Complaint',
+  out_of_office:        'Out of Office',
+  auto_reply:           'Automated / System Reply',
+  bounce:               'Bounce / Delivery Failed',
+  unsubscribe:          'Opt-Out / Unsubscribe',
 };
 
 export const CLASSIFICATION_COLORS: Record<ReplyClassification, string> = {
-  positive_interested: '#10B981',
-  meeting_requested: '#059669',
-  referral_given: '#0D9488',
-  more_info_requested: '#0EA5E9',
+  positive_interested:  '#10B981',
+  meeting_requested:    '#059669',
+  referral_given:       '#0D9488',
+  more_info_requested:  '#0EA5E9',
   neutral_needs_review: '#6B7280',
-  not_interested: '#EF4444',
-  out_of_office: '#F59E0B',
-  unsubscribe: '#F97316',
-  negative_complaint: '#DC2626',
-  auto_reply: '#9CA3AF',
+  not_interested:       '#EF4444',
+  negative_complaint:   '#DC2626',
+  out_of_office:        '#F59E0B',
+  auto_reply:           '#9CA3AF',
+  bounce:               '#78716C',
+  unsubscribe:          '#F97316',
 };
 
 // ─── Sector mapping ──────────────────────────────────────────────────────────

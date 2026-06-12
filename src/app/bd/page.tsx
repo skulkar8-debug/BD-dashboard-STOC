@@ -1044,23 +1044,26 @@ function AnalyticsTab({
     total: number; positive: number; meetings: number;
     more_info: number; referral: number; neutral: number;
     not_interested: number; unsubscribe: number; ooo: number;
+    auto_reply: number; bounce: number;
   };
   const byMonth = useMemo(() => {
     const m = new Map<string, MonthRow>();
     emails.forEach((e) => {
       if (!e.timestamp_email || e.timestamp_email.length < 7) return;
       const key = e.timestamp_email.slice(0, 7); // "2025-10"
-      const cur = m.get(key) ?? { total: 0, positive: 0, meetings: 0, more_info: 0, referral: 0, neutral: 0, not_interested: 0, unsubscribe: 0, ooo: 0 };
+      const cur = m.get(key) ?? { total: 0, positive: 0, meetings: 0, more_info: 0, referral: 0, neutral: 0, not_interested: 0, unsubscribe: 0, ooo: 0, auto_reply: 0, bounce: 0 };
       cur.total++;
       const cls = e.final_classification;
-      if (cls === 'positive_interested')  cur.positive++;
-      else if (cls === 'meeting_requested') cur.meetings++;
-      else if (cls === 'more_info_requested') cur.more_info++;
-      else if (cls === 'referral_given')   cur.referral++;
+      if (cls === 'positive_interested')   cur.positive++;
+      else if (cls === 'meeting_requested')    cur.meetings++;
+      else if (cls === 'more_info_requested')  cur.more_info++;
+      else if (cls === 'referral_given')       cur.referral++;
       else if (cls === 'neutral_needs_review') cur.neutral++;
-      else if (cls === 'not_interested')   cur.not_interested++;
-      else if (cls === 'unsubscribe')      cur.unsubscribe++;
-      else if (cls === 'out_of_office')    cur.ooo++;
+      else if (cls === 'not_interested')       cur.not_interested++;
+      else if (cls === 'unsubscribe')          cur.unsubscribe++;
+      else if (cls === 'out_of_office')        cur.ooo++;
+      else if (cls === 'auto_reply')           cur.auto_reply++;
+      else if (cls === 'bounce')               cur.bounce++;
       m.set(key, cur);
     });
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
@@ -1069,10 +1072,10 @@ function AnalyticsTab({
 
   // 4 executive buckets — detail in table below
   function monthBuckets(v: MonthRow) {
-    const qualified = v.positive + v.meetings + v.more_info + v.referral; // green
-    const neutral   = v.neutral + v.ooo;                                   // gray
-    const negative  = v.not_interested;                                     // red
-    const optout    = v.unsubscribe;                                        // orange
+    const qualified = v.positive + v.meetings + v.more_info + v.referral;      // green
+    const neutral   = v.neutral + v.ooo + v.auto_reply + v.bounce;             // gray (all non-human routing)
+    const negative  = v.not_interested;                                         // red
+    const optout    = v.unsubscribe;                                            // orange
     return { qualified, neutral, negative, optout };
   }
 
@@ -1206,7 +1209,9 @@ function AnalyticsTab({
                   <th className="text-right px-2 py-2 text-gray-400">Neutral</th>
                   <th className="text-right px-2 py-2 text-red-500">Not Int.</th>
                   <th className="text-right px-2 py-2 text-orange-500">Unsub</th>
-                  <th className="text-right px-2 py-2">OOO</th>
+                  <th className="text-right px-2 py-2 text-gray-300">OOO</th>
+                  <th className="text-right px-2 py-2 text-gray-300">Auto</th>
+                  <th className="text-right px-2 py-2 text-gray-300">Bounce</th>
                   <th className="text-right px-3 py-2">Pos%</th>
                 </tr>
               </thead>
@@ -1227,6 +1232,8 @@ function AnalyticsTab({
                       <td className="text-right px-2 py-1.5 text-red-500">{v.not_interested || '—'}</td>
                       <td className={`text-right px-2 py-1.5 font-semibold ${v.unsubscribe > 0 ? 'text-orange-500' : 'text-gray-300'}`}>{v.unsubscribe || '—'}</td>
                       <td className="text-right px-2 py-1.5 text-gray-400">{v.ooo || '—'}</td>
+                      <td className="text-right px-2 py-1.5 text-gray-400">{v.auto_reply || '—'}</td>
+                      <td className="text-right px-2 py-1.5 text-gray-400">{v.bounce || '—'}</td>
                       <td className="text-right px-3 py-1.5 font-semibold text-emerald-600">{posRate}</td>
                     </tr>
                   );
