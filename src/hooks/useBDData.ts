@@ -204,6 +204,14 @@ export function useBDData() {
     };
   }, [allCampaigns, filters.org, filters.sector, filters.state]);
 
+  // When org/sector/state narrows the campaign list, clear campaign if it's no longer valid.
+  // This runs after options recompute so we always check against the up-to-date list.
+  useEffect(() => {
+    if (filters.campaign && !options.campaigns.some((c) => c.id === filters.campaign)) {
+      setFilters((prev) => ({ ...prev, campaign: '' }));
+    }
+  }, [options.campaigns, filters.campaign]);
+
   const updateFilter = useCallback(<K extends keyof FilterState>(key: K, value: FilterState[K]) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
   }, []);

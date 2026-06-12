@@ -103,12 +103,11 @@ export function FilterBar({ filters, options, updateFilter, setDatePreset, reset
 
         <div className="w-px h-8 bg-gray-200 self-end mb-1" />
 
-        {/* Org */}
+        {/* Org — cascade clears sector/state; campaign is cleared by useBDData if no longer valid */}
         <Sel label="Org" value={filters.org} onChange={(v) => {
           updateFilter('org', v);
           updateFilter('sector', '');
           updateFilter('state', '');
-          updateFilter('campaign', '');
         }}>
           <option value="">All orgs ({options.orgs.length})</option>
           {options.orgs.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
@@ -118,7 +117,6 @@ export function FilterBar({ filters, options, updateFilter, setDatePreset, reset
         <Sel label="Sector" value={filters.sector} onChange={(v) => {
           updateFilter('sector', v);
           updateFilter('state', '');
-          updateFilter('campaign', '');
         }}>
           <option value="">All sectors{filters.org ? ` (${options.sectors.length})` : ''}</option>
           {options.sectors.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -127,7 +125,6 @@ export function FilterBar({ filters, options, updateFilter, setDatePreset, reset
         {/* State — cascades from org + sector */}
         <Sel label="State" value={filters.state} onChange={(v) => {
           updateFilter('state', v);
-          updateFilter('campaign', ''); // reset campaign when state changes
         }}>
           <option value="">All states{(filters.org || filters.sector) ? ` (${options.states.length})` : ''}</option>
           {options.states.map((s) => <option key={s} value={s}>{s}</option>)}
