@@ -136,6 +136,7 @@ function FilterDebugBar({
   const isFiltered = filteredCampaigns < totalCampaigns || filteredEmails < totalEmails;
   const activeFilters = [
     filters.org && `Org: ${filters.org}`,
+    filters.campaign && `Campaign: ${filters.campaign}`,
     filters.sector && `Sector: ${filters.sector}`,
     filters.state && `State: ${filters.state}`,
     filters.campaign_status && `Status: ${filters.campaign_status}`,
@@ -174,29 +175,34 @@ function FilterDebugBar({
 // ─── Overview ─────────────────────────────────────────────────────────────────
 
 function OverviewTab({
-  campaigns, emails, stats, analyticsAvailable, isFiltered,
+  campaigns, emails, stats, analyticsAvailable, isFiltered, campaignStats,
 }: {
   campaigns: NormalizedCampaign[];
   emails: NormalizedEmail[];
   stats: ReturnType<typeof useBDData>['stats'];
   analyticsAvailable: boolean;
   isFiltered: boolean;
+  campaignStats: ReturnType<typeof useBDData>['campaignStats'];
 }) {
+  // positive emails = human replies with positive classification (same as stats.actionable)
   const positive = emails.filter((e) => e.is_positive);
   const noAnalytics = !analyticsAvailable;
 
-  // Best performers
+  // Best performers — all counts derived from filtered emails only
   const bySector = useMemo(() => {
     const m = new Map<string, { replies: number; positive: number; sent: number }>();
+    // sent is lifetime per campaign (for context only, not used for rates)
     campaigns.forEach((c) => {
       const cur = m.get(c.sector) ?? { replies: 0, positive: 0, sent: 0 };
       cur.sent += c.sent;
-      cur.positive += c.positive_reply_count;
       m.set(c.sector, cur);
     });
+    // replies and positives come from filtered email records
     emails.forEach((e) => {
       const cur = m.get(e.sector);
-      if (cur) cur.replies++;
+      if (!cur) return;
+      cur.replies++;
+      if (e.is_positive) cur.positive++;
     });
     return m;
   }, [campaigns, emails]);
@@ -213,15 +219,22 @@ function OverviewTab({
     return m;
   }, [emails]);
 
+  // Use filtered-email-derived positive counts (not pre-computed c.positive_reply_count)
   const bestCampaign = [...campaigns]
-    .filter((c) => c.positive_reply_count > 0)
-    .sort((a, b) => b.positive_reply_count - a.positive_reply_count)[0] ?? null;
+    .map((c) => ({ c, pos: campaignStats.get(c.campaign_id)?.positive ?? 0 }))
+    .filter(({ pos }) => pos > 0)
+    .sort((a, b) => b.pos - a.pos)[0]?.c ?? null;
+  const bestCampaignPos = bestCampaign ? (campaignStats.get(bestCampaign.campaign_id)?.positive ?? 0) : 0;
+
   const bestState = [...byState.entries()]
     .filter(([, v]) => v.replies >= 2)
     .sort((a, b) => b[1].positive / Math.max(b[1].replies, 1) - a[1].positive / Math.max(a[1].replies, 1))[0];
 
-  const followUps = campaigns.filter((c) => c.recommended_action === 'Follow Up')
-    .sort((a, b) => b.positive_reply_count - a.positive_reply_count).slice(0, 5);
+  const followUps = campaigns
+    .map((c) => ({ c, pos: campaignStats.get(c.campaign_id)?.positive ?? 0 }))
+    .filter(({ pos }) => pos > 0)
+    .sort((a, b) => b.pos - a.pos)
+    .slice(0, 5);
   const toReview = campaigns.filter((c) => c.recommended_action === 'Pause / Review' || c.recommended_action === 'Review')
     .sort((a, b) => b.sent - a.sent).slice(0, 5);
 
@@ -270,9 +283,11 @@ function OverviewTab({
           </div>
         </div>
         <div className="bg-white border border-l-4 border-emerald-400 rounded-xl p-4 text-center shadow-sm">
-          <div className="text-2xl font-bold tabular-nums text-emerald-600">{fmt(stats.positive)}</div>
+          <div className="text-2xl font-bold tabular-nums text-emerald-600">{fmt(stats.actionable)}</div>
           <div className="text-[11px] text-gray-500 mt-0.5">Actionable Replies</div>
-          <div className="text-[10px] text-gray-400">{pct(stats.positive, stats.replies)} of filtered replies</div>
+          <div className="text-[10px] text-gray-400" title="Actionable ÷ human replies (excludes OOO, bounce, auto, unsub)">
+            {pct(stats.actionable, stats.humanReplies)} of {fmt(stats.humanReplies)} human
+          </div>
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-4 text-center shadow-sm">
           <div className={`text-2xl font-bold tabular-nums ${noAnalytics ? 'text-gray-300' : 'text-amber-600'}`}>
@@ -300,7 +315,7 @@ function OverviewTab({
         <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
           <div className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wide mb-1">Best Campaign</div>
           <div className="font-semibold text-gray-800 text-sm truncate" title={bestCampaign?.campaign_name}>{bestCampaign ? bestCampaign.campaign_name : '—'}</div>
-          {bestCampaign && <div className="text-xs text-gray-500 mt-0.5">{bestCampaign.positive_reply_count} positive · {bestCampaign.sector} · {bestCampaign.state}</div>}
+          {bestCampaign && <div className="text-xs text-gray-500 mt-0.5">{bestCampaignPos} positive · {bestCampaign.sector} · {bestCampaign.state}</div>}
         </div>
         <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
           <div className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wide mb-1">Best State</div>
@@ -311,9 +326,9 @@ function OverviewTab({
           <div className="text-[10px] font-semibold text-blue-600 uppercase tracking-wide mb-1">Follow Up ({followUps.length})</div>
           {followUps.length > 0 ? (
             <div className="space-y-0.5">
-              {followUps.slice(0, 3).map((c) => (
+              {followUps.slice(0, 3).map(({ c, pos }) => (
                 <div key={c.campaign_id} className="text-xs text-gray-700 truncate">
-                  <span className="text-emerald-600 font-semibold">{c.positive_reply_count}</span> · {c.campaign_name}
+                  <span className="text-emerald-600 font-semibold">{pos}</span> · {c.campaign_name}
                 </div>
               ))}
             </div>
@@ -565,7 +580,7 @@ function AgendaTab({ campaigns, emails, isFiltered }: { campaigns: NormalizedCam
 
 // ─── Sectors ──────────────────────────────────────────────────────────────────
 
-function SectorsTab({ campaigns, emails, isFiltered }: { campaigns: NormalizedCampaign[]; emails: NormalizedEmail[]; isFiltered: boolean }) {
+function SectorsTab({ campaigns, emails, isFiltered, campaignStats }: { campaigns: NormalizedCampaign[]; emails: NormalizedEmail[]; isFiltered: boolean; campaignStats: ReturnType<typeof useBDData>['campaignStats'] }) {
   const [drill, setDrill] = useState<string | null>(null);
   const bySector = useMemo(() => {
     const m = new Map<string, { campaigns: NormalizedCampaign[]; emails: NormalizedEmail[] }>();
@@ -589,7 +604,7 @@ function SectorsTab({ campaigns, emails, isFiltered }: { campaigns: NormalizedCa
           <KpiCard title="Opportunities" value={fmt(d.campaigns.reduce((s, c) => s + c.opportunities, 0))} />
           <KpiCard title="Campaigns" value={d.campaigns.length} />
         </div>
-        <CampaignTable campaigns={d.campaigns} emails={d.emails} isFiltered={isFiltered} />
+        <CampaignTable campaigns={d.campaigns} emails={d.emails} isFiltered={isFiltered} campaignStats={campaignStats} />
         {pos.length > 0 && <><div className="text-sm font-semibold text-gray-600">Positive Replies</div><EmailList emails={pos} /></>}
       </div>
     );
@@ -699,7 +714,14 @@ function StatesTab({ campaigns, emails, isFiltered }: { campaigns: NormalizedCam
 
 // ─── Campaign table ───────────────────────────────────────────────────────────
 
-function CampaignTable({ campaigns, emails: _, isFiltered }: { campaigns: NormalizedCampaign[]; emails: NormalizedEmail[]; isFiltered: boolean }) {
+function CampaignTable({
+  campaigns, emails: _, isFiltered, campaignStats,
+}: {
+  campaigns: NormalizedCampaign[];
+  emails: NormalizedEmail[];
+  isFiltered: boolean;
+  campaignStats: ReturnType<typeof useBDData>['campaignStats'];
+}) {
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<{ col: keyof NormalizedCampaign; dir: 'asc' | 'desc' }>({ col: 'sent', dir: 'desc' });
 
@@ -760,15 +782,23 @@ function CampaignTable({ campaigns, emails: _, isFiltered }: { campaigns: Normal
                 <td className="px-2 text-gray-600 text-[11px]">{c.state}</td>
                 <td className="px-2 font-medium text-gray-800 max-w-[160px] truncate" title={c.campaign_name}>{c.campaign_name}</td>
                 <td className="px-2"><StatusBadge value={c.campaign_status} /></td>
-                <td className="text-right px-2">{c.analytics_available ? fmt(c.sent) : <span className="text-gray-300">—</span>}</td>
-                <td className="text-right px-2">{c.actual_received_count}</td>
-                <td className="text-right px-2">
-                  {c.analytics_available && c.sent > 0
-                    ? <ScopedRate num={c.actual_received_count} den={c.sent} isFiltered={isFiltered} />
-                    : '—'}
-                </td>
-                <td className="text-right px-2 text-emerald-600 font-semibold">{c.positive_reply_count}</td>
-                <td className="text-right px-2">{c.actual_received_count > 0 ? c.positive_reply_rate + '%' : '—'}</td>
+                {(() => {
+                  const cs = campaignStats.get(c.campaign_id) ?? { received: 0, positive: 0, human: 0 };
+                  const posRate = cs.human > 0 ? (cs.positive / cs.human * 100).toFixed(1) + '%' : '—';
+                  return (
+                    <>
+                      <td className="text-right px-2">{c.analytics_available ? fmt(c.sent) : <span className="text-gray-300">—</span>}</td>
+                      <td className="text-right px-2" title="Received in current date/filter window">{cs.received}</td>
+                      <td className="text-right px-2">
+                        {c.analytics_available && c.sent > 0
+                          ? <ScopedRate num={cs.received} den={c.sent} isFiltered={isFiltered} />
+                          : '—'}
+                      </td>
+                      <td className="text-right px-2 text-emerald-600 font-semibold" title="Actionable replies in current filter">{cs.positive}</td>
+                      <td className="text-right px-2" title="Actionable ÷ human replies (excludes automated/unsub)">{posRate}</td>
+                    </>
+                  );
+                })()}
                 <td className={`text-right px-2 ${c.bounce_rate > 5 ? 'text-red-600 font-semibold' : ''}`}>{c.analytics_available ? c.bounces : '—'}</td>
                 <td className="text-right px-2">{c.analytics_available && c.sent > 0 ? c.bounce_rate + '%' : '—'}</td>
                 <td className="text-right px-2">{c.analytics_available ? c.unsubscribes : '—'}</td>
@@ -1045,9 +1075,11 @@ function companyFromEmail(email: string): string | null {
 function AnalyticsTab({
   campaigns,
   emails,
+  campaignStats,
 }: {
   campaigns: NormalizedCampaign[];
   emails: NormalizedEmail[];
+  campaignStats: ReturnType<typeof useBDData>['campaignStats'];
 }) {
   const positive = emails.filter((e) => e.is_positive);
 
@@ -1134,13 +1166,16 @@ function AnalyticsTab({
     return { qualified, neutral, negative, optout };
   }
 
-  // ── Top campaigns ──────────────────────────────────────────────────────────
+  // ── Top campaigns — ranked by filtered positive count ─────────────────────
   const topCampaigns = [...campaigns]
-    .filter((c) => c.positive_reply_count > 0)
-    .sort((a, b) => b.positive_reply_count - a.positive_reply_count)
+    .map((c) => ({ c, pos: campaignStats.get(c.campaign_id)?.positive ?? 0, rcv: campaignStats.get(c.campaign_id)?.received ?? 0, human: campaignStats.get(c.campaign_id)?.human ?? 0 }))
+    .filter(({ pos }) => pos > 0)
+    .sort((a, b) => b.pos - a.pos)
     .slice(0, 10);
 
   const totalReplies = emails.length;
+  // Human replies = filtered emails minus automated/unsubscribe
+  const totalHuman = emails.filter(e => !e.is_auto_reply && e.final_classification !== 'unsubscribe').length;
   const totalSent = campaigns.reduce((s, c) => s + c.sent, 0);
 
   function Bar({ value, max, color = '#3b82f6', height = 'h-3' }: { value: number; max: number; color?: string; height?: string }) {
@@ -1156,11 +1191,11 @@ function AnalyticsTab({
       {/* Summary strip */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         {[
-          { label: 'Total Replies', value: totalReplies.toLocaleString(), color: 'text-gray-900' },
-          { label: 'Positive', value: positive.length.toLocaleString(), color: 'text-emerald-600' },
-          { label: 'Pos. Rate', value: totalReplies > 0 ? (positive.length / totalReplies * 100).toFixed(1) + '%' : '—', color: 'text-emerald-600' },
+          { label: 'Total Received', value: totalReplies.toLocaleString(), color: 'text-gray-900' },
+          { label: 'Human Replies', value: totalHuman.toLocaleString(), color: 'text-gray-700' },
+          { label: 'Actionable', value: positive.length.toLocaleString(), color: 'text-emerald-600' },
+          { label: 'Actionable Rate', value: totalHuman > 0 ? (positive.length / totalHuman * 100).toFixed(1) + '%' : '—', color: 'text-emerald-600' },
           { label: 'Sent (all-time)', value: totalSent.toLocaleString(), color: 'text-blue-600' },
-          { label: 'Campaigns', value: campaigns.length.toString(), color: 'text-gray-700' },
         ].map(({ label, value, color }) => (
           <div key={label} className="bg-white border border-gray-200 rounded-xl p-3 text-center shadow-sm">
             <div className={`text-xl font-bold tabular-nums ${color}`}>{value}</div>
@@ -1339,15 +1374,15 @@ function AnalyticsTab({
                 {topCampaigns.length === 0 && (
                   <tr><td colSpan={4} className="text-center py-6 text-gray-400">No campaigns with positive replies</td></tr>
                 )}
-                {topCampaigns.map((c) => (
+                {topCampaigns.map(({ c, pos, rcv, human }) => (
                   <tr key={c.campaign_id} className="border-b border-gray-50 hover:bg-gray-50">
                     <td className="px-4 py-2 max-w-[180px]">
                       <div className="font-medium text-gray-800 truncate">{c.campaign_name}</div>
                       <div className="text-[10px] text-gray-400">{c.org_label} · {c.state}</div>
                     </td>
-                    <td className="text-right px-3 py-2 text-emerald-600 font-bold">{c.positive_reply_count}</td>
-                    <td className="text-right px-3 py-2">{c.actual_received_count}</td>
-                    <td className="text-right px-3 py-2">{c.actual_received_count > 0 ? (c.positive_reply_count / c.actual_received_count * 100).toFixed(1) + '%' : '—'}</td>
+                    <td className="text-right px-3 py-2 text-emerald-600 font-bold">{pos}</td>
+                    <td className="text-right px-3 py-2">{rcv}</td>
+                    <td className="text-right px-3 py-2" title="Actionable ÷ human replies">{human > 0 ? (pos / human * 100).toFixed(1) + '%' : '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1538,6 +1573,7 @@ export default function BDDashboard() {
     !!bd.filters.org ||
     !!bd.filters.sector ||
     !!bd.filters.state ||
+    !!bd.filters.campaign ||
     !!bd.filters.campaign_status ||
     !!bd.filters.has_positive_replies ||
     !!bd.filters.recommended_action;
@@ -1607,11 +1643,11 @@ export default function BDDashboard() {
           </div>
         ) : !bd.data ? null : (
           <>
-            {tab === 'overview'  && <OverviewTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} stats={bd.stats} analyticsAvailable={bd.stats.analyticsAvailable} isFiltered={isFiltered} />}
-            {tab === 'sectors'   && <SectorsTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} isFiltered={isFiltered} />}
+            {tab === 'overview'  && <OverviewTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} stats={bd.stats} analyticsAvailable={bd.stats.analyticsAvailable} isFiltered={isFiltered} campaignStats={bd.campaignStats} />}
+            {tab === 'sectors'   && <SectorsTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} isFiltered={isFiltered} campaignStats={bd.campaignStats} />}
             {tab === 'states'    && <StatesTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} isFiltered={isFiltered} />}
             {tab === 'inbox'     && <InboxTab emails={bd.filteredEmails} />}
-            {tab === 'analytics' && <AnalyticsTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} />}
+            {tab === 'analytics' && <AnalyticsTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} campaignStats={bd.campaignStats} />}
             {tab === 'debug'     && <DebugTab data={bd.data} />}
           </>
         )}

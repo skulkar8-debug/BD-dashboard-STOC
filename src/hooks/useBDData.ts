@@ -15,6 +15,7 @@ export type FilterState = {
   org: string;         // '' = all
   sector: string;      // '' = all
   state: string;       // '' = all
+  campaign: string;    // campaign_id, '' = all
   campaign_status: string;
   has_positive_replies: '' | 'yes' | 'no';
   recommended_action: string;
@@ -57,6 +58,7 @@ function defaultFilters(): FilterState {
     org: '',
     sector: '',
     state: '',
+    campaign: '',
     campaign_status: '',
     has_positive_replies: '',
     recommended_action: '',
@@ -102,42 +104,91 @@ export function useBDData() {
     [data]
   );
 
+  // campaignStats from filteredEmails — needed for has_positive_replies filtering
+  // We compute a preliminary version here using all emails with geo/campaign filters only.
+  const emailFilteredByCampaignDimensions = useMemo(() => {
+    return allEmails.filter((e) => {
+      if (filters.org && e.org_id !== filters.org) return false;
+      if (filters.sector && e.sector !== filters.sector) return false;
+      if (filters.state && e.state !== filters.state) return false;
+      if (filters.campaign && e.campaign_id !== filters.campaign) return false;
+      if (filters.from_date && e.timestamp_email < filters.from_date) return false;
+      if (filters.to_date && e.timestamp_email > filters.to_date + 'T23:59:59') return false;
+      return true;
+    });
+  }, [allEmails, filters.org, filters.sector, filters.state, filters.campaign, filters.from_date, filters.to_date]);
+
+  const campaignPositiveMap = useMemo(() => {
+    const m = new Map<string, boolean>();
+    emailFilteredByCampaignDimensions.forEach((e) => {
+      if (e.is_positive) m.set(e.campaign_id, true);
+    });
+    return m;
+  }, [emailFilteredByCampaignDimensions]);
+
   const filteredCampaigns = useMemo(() => {
     return allCampaigns.filter((c) => {
       if (filters.org && c.org_id !== filters.org) return false;
       if (filters.sector && c.sector !== filters.sector) return false;
       if (filters.state && c.state !== filters.state) return false;
+      if (filters.campaign && c.campaign_id !== filters.campaign) return false;
       if (filters.campaign_status && c.campaign_status !== filters.campaign_status) return false;
-      if (filters.has_positive_replies === 'yes' && c.positive_reply_count === 0) return false;
-      if (filters.has_positive_replies === 'no' && c.positive_reply_count > 0) return false;
       if (filters.recommended_action && c.recommended_action !== filters.recommended_action) return false;
+      if (filters.has_positive_replies === 'yes' && !campaignPositiveMap.has(c.campaign_id)) return false;
+      if (filters.has_positive_replies === 'no' && campaignPositiveMap.has(c.campaign_id)) return false;
       return true;
     });
-  }, [allCampaigns, filters]);
+  }, [allCampaigns, filters, campaignPositiveMap]);
 
   const filteredEmails = useMemo(() => {
     return allEmails.filter((e) => {
       if (filters.org && e.org_id !== filters.org) return false;
       if (filters.sector && e.sector !== filters.sector) return false;
       if (filters.state && e.state !== filters.state) return false;
+      if (filters.campaign && e.campaign_id !== filters.campaign) return false;
       if (filters.from_date && e.timestamp_email < filters.from_date) return false;
       if (filters.to_date && e.timestamp_email > filters.to_date + 'T23:59:59') return false;
       return true;
     });
   }, [allEmails, filters]);
 
-  const positiveEmails = useMemo(() => filteredEmails.filter((e) => e.is_positive), [filteredEmails]);
+  // ── Per-campaign stats derived from filteredEmails ────────────────────────
+  // These replace c.positive_reply_count / c.actual_received_count everywhere
+  // in the UI so that date/campaign filters are correctly reflected.
+  const campaignStats = useMemo(() => {
+    const m = new Map<string, { received: number; positive: number; human: number }>();
+    filteredEmails.forEach((e) => {
+      const cur = m.get(e.campaign_id) ?? { received: 0, positive: 0, human: 0 };
+      cur.received++;
+      if (e.is_positive) cur.positive++;
+      if (!e.is_auto_reply && e.final_classification !== 'unsubscribe') cur.human++;
+      if (!m.has(e.campaign_id)) m.set(e.campaign_id, cur);
+      else m.set(e.campaign_id, cur);
+    });
+    return m;
+  }, [filteredEmails]);
+
+  // ── Human / actionable split (excludes automated + unsubscribe) ───────────
+  const humanEmails = useMemo(
+    () => filteredEmails.filter(
+      (e) => !e.is_auto_reply && e.final_classification !== 'unsubscribe'
+    ),
+    [filteredEmails]
+  );
+  const positiveEmails = useMemo(() => humanEmails.filter((e) => e.is_positive), [humanEmails]);
 
   // Dimension options derived from ALL campaigns (not filtered) for the filter dropdowns
   const options = useMemo(() => {
-    // Cascading: sectors + states filtered by selected org (if any)
+    // Cascading: sectors + states + campaigns filtered by selected org/sector/state
     const orgCampaigns = filters.org
       ? allCampaigns.filter((c) => c.org_id === filters.org)
       : allCampaigns;
-    // States further filtered by selected sector
     const sectorCampaigns = filters.sector
       ? orgCampaigns.filter((c) => c.sector === filters.sector)
       : orgCampaigns;
+    const stateCampaigns = filters.state
+      ? sectorCampaigns.filter((c) => c.state === filters.state)
+      : sectorCampaigns;
     return {
       orgs: [...new Map(allCampaigns.map((c) => [c.org_id, c.org_label])).entries()]
         .map(([id, label]) => ({ id, label })),
@@ -145,10 +196,13 @@ export function useBDData() {
       states: [...new Set(
         sectorCampaigns.map((c) => c.state).filter((s) => s && s !== 'Unmapped')
       )].sort(),
+      campaigns: [...stateCampaigns]
+        .sort((a, b) => a.campaign_name.localeCompare(b.campaign_name))
+        .map((c) => ({ id: c.campaign_id, name: c.campaign_name, org: c.org_label })),
       campaign_statuses: [...new Set(allCampaigns.map((c) => c.campaign_status))].sort(),
       recommended_actions: [...new Set(allCampaigns.map((c) => c.recommended_action))].sort(),
     };
-  }, [allCampaigns, filters.org, filters.sector]);
+  }, [allCampaigns, filters.org, filters.sector, filters.state]);
 
   const updateFilter = useCallback(<K extends keyof FilterState>(key: K, value: FilterState[K]) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
@@ -164,8 +218,14 @@ export function useBDData() {
   const stats = useMemo(() => {
     const sent = filteredCampaigns.reduce((s, c) => s + c.sent, 0);
     const analyticsAvailable = filteredCampaigns.some((c) => c.analytics_available);
-    const replies = filteredEmails.length;
-    const positive = positiveEmails.length;
+
+    // All received emails (includes automated, OOO, unsubscribe)
+    const totalReceived = filteredEmails.length;
+    // Human replies only — excludes automated/OOO/bounce/unsubscribe
+    const humanReplies = humanEmails.length;
+    // Actionable = positive classification among human replies
+    const actionable = positiveEmails.length;
+
     const opps = filteredCampaigns.reduce((s, c) => s + c.opportunities, 0);
     const bounces = filteredCampaigns.reduce((s, c) => s + c.bounces, 0);
     const unsubs = filteredCampaigns.reduce((s, c) => s + c.unsubscribes, 0);
@@ -182,10 +242,14 @@ export function useBDData() {
     return {
       sent,
       analyticsAvailable,
-      replies,
-      reply_rate: r(replies, sent),
-      positive,
-      positive_reply_rate: r(positive, replies),
+      // Kept for backward compat display but clearly named
+      replies: totalReceived,           // all received (incl. automated)
+      humanReplies,                      // excludes OOO/bounce/auto/unsub
+      actionable,                        // positive classification, human only
+      actionable_rate: r(actionable, humanReplies),  // actionable / human
+      // legacy aliases (some tabs still use these, same values)
+      positive: actionable,
+      positive_reply_rate: r(actionable, humanReplies),
       opps,
       opp_rate: r(opps, sent),
       bounces,
@@ -197,13 +261,14 @@ export function useBDData() {
       needsAttention,
       followUp,
     };
-  }, [filteredCampaigns, filteredEmails, positiveEmails]);
+  }, [filteredCampaigns, filteredEmails, humanEmails, positiveEmails]);
 
   return {
     data, loading, error, refresh: load,
     filters, updateFilter, setDatePreset, resetFilters,
     allCampaigns, allEmails,
-    filteredCampaigns, filteredEmails, positiveEmails,
+    filteredCampaigns, filteredEmails, humanEmails, positiveEmails,
+    campaignStats,   // Map<campaign_id, {received, positive, human}> — from filtered emails
     options, stats,
   };
 }

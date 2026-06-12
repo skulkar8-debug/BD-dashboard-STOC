@@ -19,6 +19,7 @@ type Props = {
     orgs: { id: string; label: string }[];
     sectors: string[];
     states: string[];
+    campaigns: { id: string; name: string; org: string }[];
     campaign_statuses: string[];
     recommended_actions: string[];
   };
@@ -70,7 +71,7 @@ function DateInput({
 
 export function FilterBar({ filters, options, updateFilter, setDatePreset, resetFilters }: Props) {
   const activeCount = [
-    filters.org, filters.sector, filters.state,
+    filters.org, filters.sector, filters.state, filters.campaign,
     filters.campaign_status, filters.has_positive_replies, filters.recommended_action,
     filters.datePreset !== 'last_30' ? 'x' : '',
   ].filter(Boolean).length;
@@ -105,9 +106,9 @@ export function FilterBar({ filters, options, updateFilter, setDatePreset, reset
         {/* Org */}
         <Sel label="Org" value={filters.org} onChange={(v) => {
           updateFilter('org', v);
-          // Reset dependent filters when org changes
           updateFilter('sector', '');
           updateFilter('state', '');
+          updateFilter('campaign', '');
         }}>
           <option value="">All orgs ({options.orgs.length})</option>
           {options.orgs.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
@@ -116,16 +117,32 @@ export function FilterBar({ filters, options, updateFilter, setDatePreset, reset
         {/* Sector — cascades from selected org */}
         <Sel label="Sector" value={filters.sector} onChange={(v) => {
           updateFilter('sector', v);
-          updateFilter('state', ''); // reset state when sector changes
+          updateFilter('state', '');
+          updateFilter('campaign', '');
         }}>
           <option value="">All sectors{filters.org ? ` (${options.sectors.length})` : ''}</option>
           {options.sectors.map((s) => <option key={s} value={s}>{s}</option>)}
         </Sel>
 
         {/* State — cascades from org + sector */}
-        <Sel label="State" value={filters.state} onChange={(v) => updateFilter('state', v)}>
+        <Sel label="State" value={filters.state} onChange={(v) => {
+          updateFilter('state', v);
+          updateFilter('campaign', ''); // reset campaign when state changes
+        }}>
           <option value="">All states{(filters.org || filters.sector) ? ` (${options.states.length})` : ''}</option>
           {options.states.map((s) => <option key={s} value={s}>{s}</option>)}
+        </Sel>
+
+        {/* Campaign — cascades from org + sector + state */}
+        <Sel label="Campaign" value={filters.campaign} onChange={(v) => updateFilter('campaign', v)}>
+          <option value="">
+            {options.campaigns.length > 0
+              ? `All campaigns (${options.campaigns.length})`
+              : 'All campaigns'}
+          </option>
+          {options.campaigns.map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
         </Sel>
 
         {/* Campaign status */}
