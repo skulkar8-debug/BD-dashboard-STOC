@@ -24,8 +24,16 @@ export function getAppUrl(): string {
   return 'http://localhost:3000'
 }
 
+function sanitizeClientId(raw: string | undefined): string {
+  if (!raw) return ''
+  return raw
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/+$/, '')
+}
+
 export function getGoogleOAuthConfig() {
-  const clientId = process.env.GOOGLE_CLIENT_ID?.trim()
+  const clientId = sanitizeClientId(process.env.GOOGLE_CLIENT_ID)
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim()
   const authSecret = process.env.AUTH_SECRET?.trim()
 
@@ -50,7 +58,7 @@ export function getGoogleOAuthConfig() {
 
 export function isGoogleOAuthConfigured(): boolean {
   return !!(
-    process.env.GOOGLE_CLIENT_ID?.trim() &&
+    sanitizeClientId(process.env.GOOGLE_CLIENT_ID) &&
     process.env.GOOGLE_CLIENT_SECRET?.trim() &&
     process.env.AUTH_SECRET?.trim()
   )
