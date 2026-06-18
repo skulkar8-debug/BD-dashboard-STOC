@@ -2,7 +2,8 @@
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
-import { useBDData } from '@/hooks/useBDData';
+import { useBDData, presetDates, defaultFilters } from '@/hooks/useBDData';
+import type { FilterState, DatePreset } from '@/hooks/useBDData';
 import { FilterBar } from '@/components/bd/FilterBar';
 import { KpiCard } from '@/components/bd/KpiCard';
 import { StatusBadge } from '@/components/bd/Badge';
@@ -12,12 +13,70 @@ import { exportCampaignsCsv, exportEmailsCsv, downloadCsv } from '@/lib/instantl
 import { SECTOR_OPTIONS } from '@/config/campaign-sector-map';
 import {
   Loader2, RefreshCw, AlertTriangle, Bug, BarChart3,
-  Calendar, Layers, MapPin, Table2, Inbox, TrendingUp, ChevronDown, ChevronRight, GitCompare,
+  Calendar, Layers, MapPin, Table2, Inbox, TrendingUp, ChevronDown, ChevronRight, GitCompare, Link2, Check,
 } from 'lucide-react';
 // Note: Calendar, TrendingUp kept for potential future use
 import Image from 'next/image';
 
-// Leaflet is browser-only — must be dynamically imported with SSR disabled
+// ─── Deep-link URL sync ───────────────────────────────────────────────────────
+
+const VALID_TABS = ['overview','sectors','states','compare','inbox','analytics','debug'] as const;
+type TabId = typeof VALID_TABS[number];
+
+function parseUrl(): { filters: FilterState; tab: TabId; sectorA: string; sectorB: string } {
+  const def = defaultFilters();
+  if (typeof window === 'undefined') return { filters: def, tab: 'overview', sectorA: '', sectorB: '' };
+  const p = new URLSearchParams(window.location.search);
+
+  const dp = (p.get('dp') ?? def.datePreset) as DatePreset;
+  const dates = dp === 'custom'
+    ? { from_date: p.get('fd') ?? '', to_date: p.get('td') ?? '' }
+    : presetDates(dp);
+
+  const rawTab = p.get('tab') ?? 'overview';
+  const tab: TabId = (VALID_TABS as readonly string[]).includes(rawTab) ? rawTab as TabId : 'overview';
+
+  return {
+    filters: {
+      datePreset: dp,
+      from_date: dates.from_date,
+      to_date: dates.to_date,
+      orgs: p.getAll('org'),
+      sectors: p.getAll('sec'),
+      state: p.get('st') ?? '',
+      campaigns: p.getAll('c'),
+      campaign_status: p.get('cs') ?? '',
+      has_positive_replies: (p.get('hpr') ?? '') as FilterState['has_positive_replies'],
+      recommended_action: p.get('ra') ?? '',
+    },
+    tab,
+    sectorA: p.get('sa') ?? '',
+    sectorB: p.get('sb') ?? '',
+  };
+}
+
+function buildUrl(filters: FilterState, tab: TabId, sectorA: string, sectorB: string): string {
+  const p = new URLSearchParams();
+  if (tab !== 'overview') p.set('tab', tab);
+  if (filters.datePreset !== 'last_30') p.set('dp', filters.datePreset);
+  if (filters.datePreset === 'custom') {
+    if (filters.from_date) p.set('fd', filters.from_date);
+    if (filters.to_date)   p.set('td', filters.to_date);
+  }
+  filters.orgs.forEach((v) => p.append('org', v));
+  filters.sectors.forEach((v) => p.append('sec', v));
+  if (filters.state) p.set('st', filters.state);
+  filters.campaigns.forEach((v) => p.append('c', v));
+  if (filters.campaign_status) p.set('cs', filters.campaign_status);
+  if (filters.has_positive_replies) p.set('hpr', filters.has_positive_replies);
+  if (filters.recommended_action) p.set('ra', filters.recommended_action);
+  if (sectorA) p.set('sa', sectorA);
+  if (sectorB) p.set('sb', sectorB);
+  const qs = p.toString();
+  return qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+}
+
+// ─── Leaflet is browser-only — must be dynamically imported with SSR disabled
 const StatePerformanceMap = dynamic(
   () => import('@/components/bd/StatePerformanceMap'),
   {
@@ -39,7 +98,6 @@ const TABS = [
   { id: 'analytics', label: 'Analytics',  icon: <TrendingUp className="h-3.5 w-3.5" /> },
   { id: 'debug',     label: 'Debug',      icon: <Bug className="h-3.5 w-3.5" /> },
 ] as const;
-type TabId = (typeof TABS)[number]['id'];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1544,20 +1602,22 @@ function CmpKpi({ label, a, b, colorA, colorB, higherBetter = true, fmt: f }: {
   );
 }
 
-function CompareTab({ filteredCampaigns, filteredEmails }: { filteredCampaigns: NormalizedCampaign[]; filteredEmails: NormalizedEmail[] }) {
+function CompareTab({ filteredCampaigns, filteredEmails, sectorA, setSectorA, sectorB, setSectorB }: {
+  filteredCampaigns: NormalizedCampaign[];
+  filteredEmails: NormalizedEmail[];
+  sectorA: string; setSectorA: (s: string) => void;
+  sectorB: string; setSectorB: (s: string) => void;
+}) {
   const sectorList = useMemo(() => {
     const present = new Set(filteredCampaigns.map((c) => c.sector));
     return SECTOR_OPTIONS.filter((s) => present.has(s) && s !== 'Other / Unmapped');
   }, [filteredCampaigns]);
 
-  const [sectorA, setSectorA] = useState<string>('');
-  const [sectorB, setSectorB] = useState<string>('');
-
-  // Auto-select first two when list becomes available
+  // Auto-select first two when list becomes available and nothing is set yet
   useEffect(() => {
     if (sectorList.length > 0 && !sectorA) setSectorA(sectorList[0]);
     if (sectorList.length > 1 && !sectorB) setSectorB(sectorList[1]);
-  }, [sectorList, sectorA, sectorB]);
+  }, [sectorList, sectorA, sectorB, setSectorA, setSectorB]);
 
   const profA = useMemo(() => sectorA ? buildProfile(sectorA, filteredCampaigns, filteredEmails) : null, [sectorA, filteredCampaigns, filteredEmails]);
   const profB = useMemo(() => sectorB ? buildProfile(sectorB, filteredCampaigns, filteredEmails) : null, [sectorB, filteredCampaigns, filteredEmails]);
@@ -1982,10 +2042,39 @@ function DebugTab({ data }: { data: BDData | null }) {
 
 export default function BDDashboard() {
   const [tab, setTab] = useState<TabId>('overview');
+  const [sectorA, setSectorA] = useState('');
+  const [sectorB, setSectorB] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [urlReady, setUrlReady] = useState(false);
+
   const bd = useBDData();
 
-  // True when any UI filter is active — reply counts are scoped, sent is lifetime.
-  // In this state, sent-denominator rates (reply%, open%) would be misleading.
+  // On first mount: read URL and apply to state
+  useEffect(() => {
+    const parsed = parseUrl();
+    bd.setFilters(parsed.filters);
+    setTab(parsed.tab);
+    if (parsed.sectorA) setSectorA(parsed.sectorA);
+    if (parsed.sectorB) setSectorB(parsed.sectorB);
+    setUrlReady(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally run once on mount
+
+  // Sync URL whenever filters/tab/sectors change (after initial parse)
+  useEffect(() => {
+    if (!urlReady) return;
+    const url = buildUrl(bd.filters, tab, sectorA, sectorB);
+    window.history.replaceState(null, '', url);
+  }, [bd.filters, tab, sectorA, sectorB, urlReady]);
+
+  const copyLink = useCallback(() => {
+    const url = window.location.href;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, []);
+
   const isFiltered =
     bd.filters.datePreset !== 'all' ||
     bd.filters.orgs.length > 0 ||
@@ -2006,13 +2095,26 @@ export default function BDDashboard() {
             <div className="h-5 w-px bg-gray-200" />
             <span className="text-sm font-semibold text-gray-700">BD Dashboard</span>
           </div>
-          <div className="flex items-center gap-3 text-xs text-gray-400">
+          <div className="flex items-center gap-2 text-xs text-gray-400">
             {bd.data && !bd.loading && (
               <span className="hidden sm:inline">
                 {bd.data.total_campaigns} campaigns · {bd.data.total_emails} emails · updated {ago(bd.data.fetched_at)}
               </span>
             )}
             {bd.loading && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
+            {/* Copy shareable link */}
+            <button
+              onClick={copyLink}
+              title="Copy shareable link"
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                copied
+                  ? 'bg-green-50 text-green-600 border border-green-200'
+                  : 'bg-gray-50 text-gray-500 border border-gray-200 hover:bg-gray-100'
+              }`}
+            >
+              {copied ? <Check className="h-3.5 w-3.5" /> : <Link2 className="h-3.5 w-3.5" />}
+              <span className="hidden sm:inline">{copied ? 'Copied!' : 'Share'}</span>
+            </button>
             <button onClick={() => bd.hardRefresh()} disabled={bd.loading} className="p-1.5 rounded-lg hover:bg-gray-100 disabled:opacity-50" title="Force re-pull from Instantly API">
               <RefreshCw className="h-3.5 w-3.5 text-gray-500" />
             </button>
@@ -2063,7 +2165,7 @@ export default function BDDashboard() {
             {tab === 'overview'  && <OverviewTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} stats={bd.stats} analyticsAvailable={bd.stats.analyticsAvailable} isFiltered={isFiltered} campaignStats={bd.campaignStats} />}
             {tab === 'sectors'   && <SectorsTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} isFiltered={isFiltered} campaignStats={bd.campaignStats} />}
             {tab === 'states'    && <StatesTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} isFiltered={isFiltered} />}
-            {tab === 'compare'   && <CompareTab filteredCampaigns={bd.filteredCampaigns} filteredEmails={bd.filteredEmails} />}
+            {tab === 'compare'   && <CompareTab filteredCampaigns={bd.filteredCampaigns} filteredEmails={bd.filteredEmails} sectorA={sectorA} setSectorA={setSectorA} sectorB={sectorB} setSectorB={setSectorB} />}
             {tab === 'inbox'     && <InboxTab emails={bd.filteredEmails} />}
             {tab === 'analytics' && <AnalyticsTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} campaignStats={bd.campaignStats} />}
             {tab === 'debug'     && <DebugTab data={bd.data} />}

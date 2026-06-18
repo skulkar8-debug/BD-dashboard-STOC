@@ -21,7 +21,7 @@ export type FilterState = {
   recommended_action: string;
 };
 
-function presetDates(preset: DatePreset): { from_date: string; to_date: string } {
+export function presetDates(preset: DatePreset): { from_date: string; to_date: string } {
   const today = new Date();
   const iso = (d: Date) => format(d, 'yyyy-MM-dd');
   switch (preset) {
@@ -47,7 +47,7 @@ function presetDates(preset: DatePreset): { from_date: string; to_date: string }
   }
 }
 
-function defaultFilters(): FilterState {
+export function defaultFilters(): FilterState {
   return {
     datePreset: 'last_30',
     ...presetDates('last_30'),
@@ -253,7 +253,7 @@ export function useBDData() {
 
   return {
     data, loading, error, refresh: load, hardRefresh: () => load(true),
-    filters, updateFilter, setDatePreset, resetFilters,
+    filters, setFilters, updateFilter, setDatePreset, resetFilters,
     allCampaigns, allEmails,
     filteredCampaigns, filteredEmails, humanEmails, positiveEmails,
     campaignStats,
