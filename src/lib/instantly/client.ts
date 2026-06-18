@@ -30,16 +30,22 @@ async function get<T>(
   return res.json() as Promise<T>;
 }
 
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 // Paginate endpoints that return { items, next_starting_after }
+// interPageDelayMs: pause between pages to stay under 20 req/min rate limit per key
 async function paginateItems<T>(
   apiKey: string,
   path: string,
   params: Record<string, string> = {},
-  maxItems = 500
+  maxItems = 500,
+  interPageDelayMs = 0
 ): Promise<T[]> {
   const items: T[] = [];
   let startingAfter: string | undefined;
+  let page = 0;
   for (;;) {
+    if (page > 0 && interPageDelayMs > 0) await sleep(interPageDelayMs);
     const p: Record<string, string> = {
       ...params,
       limit: '100',
@@ -48,6 +54,7 @@ async function paginateItems<T>(
     const res = await get<{ items?: T[]; next_starting_after?: string }>(apiKey, path, p);
     const batch = res.items ?? [];
     items.push(...batch);
+    page++;
     if (!res.next_starting_after || batch.length === 0 || items.length >= maxItems) break;
     startingAfter = res.next_starting_after;
   }
@@ -89,14 +96,15 @@ export async function fetchAllCampaignAnalytics(
 export async function fetchReceivedEmails(
   apiKey: string,
   campaignId?: string,
-  limit = 5000
+  limit = 1000
 ): Promise<InstantlyEmail[]> {
   const params: Record<string, string> = {
     email_type: 'received',
     preview_only: 'false',
   };
   if (campaignId) params.campaign_id = campaignId;
-  return paginateItems<InstantlyEmail>(apiKey, '/emails', params, limit);
+  // 350ms between pages → 10 pages (1000 emails) takes ~3.5s, well under 20 req/min
+  return paginateItems<InstantlyEmail>(apiKey, '/emails', params, limit, 350);
 }
 
 export async function fetchEmailById(

@@ -37,7 +37,7 @@ async function fetchOrgData(org: OrgConfig): Promise<OrgData> {
   let rawEmails: Awaited<ReturnType<typeof fetchReceivedEmails>> = [];
   let email_pull_warning: string | undefined;
   try {
-    rawEmails = await fetchReceivedEmails(org.apiKey, undefined, 5000);
+    rawEmails = await fetchReceivedEmails(org.apiKey, undefined, 1000);
     if (rawEmails.length === 0) {
       email_pull_warning = 'No received emails returned for this org.';
     }
