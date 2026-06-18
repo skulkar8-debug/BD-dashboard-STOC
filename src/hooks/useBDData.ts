@@ -71,11 +71,11 @@ export function useBDData() {
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<FilterState>(defaultFilters());
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (forceRefresh = false) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/instantly/data');
+      const res = await fetch(forceRefresh ? '/api/instantly/data?refresh=1' : '/api/instantly/data');
       if (!res.ok) {
         let msg = `HTTP ${res.status}`;
         try {
@@ -272,7 +272,7 @@ export function useBDData() {
   }, [filteredCampaigns, filteredEmails, humanEmails, positiveEmails]);
 
   return {
-    data, loading, error, refresh: load,
+    data, loading, error, refresh: load, hardRefresh: () => load(true),
     filters, updateFilter, setDatePreset, resetFilters,
     allCampaigns, allEmails,
     filteredCampaigns, filteredEmails, humanEmails, positiveEmails,

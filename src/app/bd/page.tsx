@@ -1595,7 +1595,7 @@ export default function BDDashboard() {
               </span>
             )}
             {bd.loading && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
-            <button onClick={bd.refresh} disabled={bd.loading} className="p-1.5 rounded-lg hover:bg-gray-100 disabled:opacity-50" title="Refresh (cached 5 min)">
+            <button onClick={() => bd.hardRefresh()} disabled={bd.loading} className="p-1.5 rounded-lg hover:bg-gray-100 disabled:opacity-50" title="Force re-pull from Instantly API">
               <RefreshCw className="h-3.5 w-3.5 text-gray-500" />
             </button>
             <a href="/" className="hidden sm:inline hover:text-gray-600 transition-colors">← Pipeline</a>

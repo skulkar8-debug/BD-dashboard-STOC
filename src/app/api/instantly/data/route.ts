@@ -37,7 +37,7 @@ async function fetchOrgData(org: OrgConfig): Promise<OrgData> {
   let rawEmails: Awaited<ReturnType<typeof fetchReceivedEmails>> = [];
   let email_pull_warning: string | undefined;
   try {
-    rawEmails = await fetchReceivedEmails(org.apiKey, undefined, 500);
+    rawEmails = await fetchReceivedEmails(org.apiKey, undefined, 2000);
     if (rawEmails.length === 0) {
       email_pull_warning = 'No received emails returned for this org.';
     }
@@ -87,9 +87,10 @@ async function fetchOrgData(org: OrgConfig): Promise<OrgData> {
   return { org, campaigns: normalizedCampaigns, emails: normalizedEmails, errors, email_pull_warning };
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const now = Date.now();
-  if (cacheData && now < cacheExpires) {
+  const refresh = new URL(req.url).searchParams.get('refresh');
+  if (cacheData && now < cacheExpires && !refresh) {
     return NextResponse.json(cacheData);
   }
 

@@ -55,7 +55,7 @@ async function paginateItems<T>(
 }
 
 export async function fetchCampaigns(apiKey: string): Promise<InstantlyCampaign[]> {
-  return paginateItems<InstantlyCampaign>(apiKey, '/campaigns', {}, 500);
+  return paginateItems<InstantlyCampaign>(apiKey, '/campaigns', {}, 2000);
 }
 
 // GET /api/v2/campaigns/analytics returns a raw array (not paginated items wrapper)
@@ -65,7 +65,7 @@ export async function fetchAllCampaignAnalytics(
 ): Promise<{ data: Record<string, InstantlyAnalytics>; error?: string }> {
   try {
     // Returns a raw array — fetch with large limit
-    const res = await get<unknown>(apiKey, '/campaigns/analytics', { limit: '500' });
+    const res = await get<unknown>(apiKey, '/campaigns/analytics', { limit: '2000' });
 
     let items: InstantlyAnalytics[] = [];
     if (Array.isArray(res)) {
@@ -89,7 +89,7 @@ export async function fetchAllCampaignAnalytics(
 export async function fetchReceivedEmails(
   apiKey: string,
   campaignId?: string,
-  limit = 500
+  limit = 2000
 ): Promise<InstantlyEmail[]> {
   const params: Record<string, string> = {
     email_type: 'received',
