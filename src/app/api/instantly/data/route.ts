@@ -5,11 +5,13 @@ import { normalizeCampaign, normalizeEmail, resolveMapping } from '@/lib/instant
 import type { BDData, NormalizedEmail, OrgData, OrgConfig, InstantlyAnalytics } from '@/lib/instantly/types';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 300; // Vercel Pro: allow up to 5 min for full email fetch
 
-// 5-minute in-memory cache per org set
+// 12-hour in-memory cache — data refreshes twice a day automatically
+// Use ?refresh=1 to force an immediate re-fetch
 let cacheData: BDData | null = null;
 let cacheExpires = 0;
-const CACHE_TTL = 5 * 60 * 1000;
+const CACHE_TTL = 12 * 60 * 60 * 1000;
 
 async function fetchOrgData(org: OrgConfig): Promise<OrgData> {
   const errors: OrgData['errors'] = {};
@@ -37,7 +39,7 @@ async function fetchOrgData(org: OrgConfig): Promise<OrgData> {
   let rawEmails: Awaited<ReturnType<typeof fetchReceivedEmails>> = [];
   let email_pull_warning: string | undefined;
   try {
-    rawEmails = await fetchReceivedEmails(org.apiKey, undefined, 1000);
+    rawEmails = await fetchReceivedEmails(org.apiKey, undefined, 10_000);
     if (rawEmails.length === 0) {
       email_pull_warning = 'No received emails returned for this org.';
     }

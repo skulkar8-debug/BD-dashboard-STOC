@@ -110,14 +110,14 @@ export async function fetchAllCampaignAnalytics(
 export async function fetchReceivedEmails(
   apiKey: string,
   campaignId?: string,
-  limit = 1000
+  limit = 10_000
 ): Promise<InstantlyEmail[]> {
   const params: Record<string, string> = {
     email_type: 'received',
     preview_only: 'false',
   };
   if (campaignId) params.campaign_id = campaignId;
-  // 350ms between pages → 10 pages (1000 emails) takes ~3.5s, well under 20 req/min
+  // 350ms between pages keeps requests well under the 20 req/min rate limit per key
   return paginateItems<InstantlyEmail>(apiKey, '/emails', params, limit, 350);
 }
 
