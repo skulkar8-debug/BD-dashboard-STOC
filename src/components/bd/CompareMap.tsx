@@ -10,7 +10,6 @@ type ByState = Map<string, { replies: number; positive: number }>;
 
 export type CompareHeatMapProps = {
   byState: ByState;
-  /** hex color for this sector — controls the bucket color ramp */
   color: "blue" | "green";
   label: string;
 };
@@ -34,11 +33,8 @@ function getBucketColor(positive: number, color: "blue" | "green"): string {
 const GEOJSON_URL =
   "https://raw.githubusercontent.com/PublicaMundi/MappingAPI/master/data/geojson/us-states.json";
 
-const DEFAULT_STYLE: PathOptions = {
-  weight: 1.5, opacity: 1, color: "#ffffff", dashArray: "3", fillOpacity: 0.72,
-};
-const HOVER_STYLE: PathOptions = {
-  weight: 3, color: "#555", dashArray: "", fillOpacity: 0.85,
+const BASE_STYLE: PathOptions = {
+  weight: 1, opacity: 1, color: "#ffffff", dashArray: "", fillOpacity: 0.72,
 };
 
 function getFeatureName(feature?: Feature<Geometry, GeoJsonProperties>): string {
@@ -50,7 +46,6 @@ function getFeatureName(feature?: Feature<Geometry, GeoJsonProperties>): string 
 export default function CompareMap({ byState, color, label }: CompareHeatMapProps) {
   const [geoData, setGeoData] = useState<FeatureCollection | null>(null);
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
-  const [hovered, setHovered] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -61,7 +56,7 @@ export default function CompareMap({ byState, color, label }: CompareHeatMapProp
     return () => { live = false; };
   }, []);
 
-  // build lookup with case-insensitive fallbacks
+  // Case-insensitive lookup
   const lookup = useMemo(() => {
     const m = new Map<string, { replies: number; positive: number }>();
     byState.forEach((v, name) => {
@@ -86,41 +81,50 @@ export default function CompareMap({ byState, color, label }: CompareHeatMapProp
   const styleFeature = useCallback((feature: any): PathOptions => {
     const name = getFeatureName(feature);
     const s = lookupState(name);
-    return { ...DEFAULT_STYLE, fillColor: getBucketColor(s?.positive ?? 0, color) };
+    return { ...BASE_STYLE, fillColor: getBucketColor(s?.positive ?? 0, color) };
   }, [lookupState, color]);
 
+  // Use Leaflet's native tooltip only — no React hover state to avoid stuck highlights
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const onEachFeature = useCallback((feature: any, layer: any) => {
     const name = getFeatureName(feature);
+    const s = lookupState(name);
+
+    const fillColor = getBucketColor(s?.positive ?? 0, color);
+
+    // Highlight on hover via Leaflet path events — reset reliably on mouseout
     layer.on({
-      mouseover(e: { target: { setStyle: (s: PathOptions) => void; bringToFront: () => void } }) {
-        const s = lookupState(name);
-        setHovered(name);
-        e.target.setStyle({ ...HOVER_STYLE, fillColor: getBucketColor(s?.positive ?? 0, color) });
-        e.target.bringToFront();
+      mouseover() {
+        layer.setStyle({ ...BASE_STYLE, fillColor, weight: 2.5, color: '#555', fillOpacity: 0.9 });
+        layer.bringToFront();
       },
-      mouseout(e: { target: { setStyle: (s: PathOptions) => void } }) {
-        const s = lookupState(name);
-        setHovered(null);
-        e.target.setStyle({ ...DEFAULT_STYLE, fillColor: getBucketColor(s?.positive ?? 0, color) });
+      mouseout() {
+        layer.setStyle({ ...BASE_STYLE, fillColor });
       },
     });
-    const s = lookupState(name);
-    if (s && s.positive > 0) {
+
+    // Tooltip content
+    if (s && (s.positive > 0 || s.replies > 0)) {
       layer.bindTooltip(
         `<div style="font-size:12px;font-weight:600;margin-bottom:2px">${name}</div>` +
-        `<div style="font-weight:600">${s.positive} positive</div>` +
-        `<div style="color:#6b7280;font-size:11px">${s.replies} total replies</div>`,
-        { sticky: true }
+        `<div><span style="color:#6b7280">Positive: </span><strong>${s.positive}</strong></div>` +
+        `<div><span style="color:#6b7280">Replies: </span><strong>${s.replies}</strong></div>` +
+        (s.replies > 0 ? `<div style="color:#9ca3af;font-size:11px">${(s.positive / s.replies * 100).toFixed(1)}% rate</div>` : ''),
+        { sticky: true, opacity: 0.97 }
+      );
+    } else {
+      layer.bindTooltip(
+        `<div style="font-size:12px;font-weight:600;margin-bottom:2px">${name}</div>` +
+        `<div style="color:#9ca3af;font-size:11px">No data</div>`,
+        { sticky: true, opacity: 0.97 }
       );
     }
   }, [lookupState, color]);
 
-  const hoveredData = hovered ? lookupState(hovered) : null;
   const cfg = BUCKETS[color];
 
   return (
-    <div className="relative" style={{ height: 310 }}>
+    <div className="relative" style={{ height: 300 }}>
       {loadState === "loading" && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-50 z-10">
           <span className="text-sm text-gray-400">Loading map…</span>
@@ -153,23 +157,6 @@ export default function CompareMap({ byState, color, label }: CompareHeatMapProp
             onEachFeature={onEachFeature}
           />
         </MapContainer>
-      )}
-      {/* Hover tooltip */}
-      {loadState === "ready" && (
-        <div className="absolute top-2 right-2 z-[1000] bg-white/95 border border-gray-200 rounded-lg shadow p-2.5 text-xs pointer-events-none min-w-[130px]">
-          {!hovered ? (
-            <div className="text-gray-400 text-center py-1">Hover a state</div>
-          ) : !hoveredData ? (
-            <><div className="font-semibold text-gray-800 mb-1">{hovered}</div><div className="text-gray-400">No data</div></>
-          ) : (
-            <>
-              <div className="font-semibold text-gray-800 mb-1">{hovered}</div>
-              <div className="text-gray-500">Replies: <span className="font-semibold text-gray-800">{hoveredData.replies}</span></div>
-              <div className="text-gray-500">Positive: <span className="font-semibold text-gray-800">{hoveredData.positive}</span></div>
-              {hoveredData.replies > 0 && <div className="text-gray-400 text-[11px]">{(hoveredData.positive / hoveredData.replies * 100).toFixed(1)}% rate</div>}
-            </>
-          )}
-        </div>
       )}
       {/* Legend */}
       {loadState === "ready" && (

@@ -1643,22 +1643,22 @@ function CompareTab({ filteredCampaigns, filteredEmails }: { filteredCampaigns: 
       {/* Scoreboard */}
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
         <div className="grid grid-cols-3 divide-x divide-gray-100">
-          <div className="p-5 text-center" style={{ backgroundColor: `${colorA}12` }}>
-            <div className="text-3xl font-black" style={{ color: colorA }}>{scores.A}</div>
-            <div className="text-sm font-semibold text-gray-700 mt-1">{profA.label}</div>
-            <div className="text-[11px] text-gray-400 mt-0.5">{profA.campaigns.length} campaigns · {profA.emails.length} replies</div>
-            {winner === 'A' && <div className="mt-2 inline-block text-xs font-bold px-3 py-0.5 rounded-full text-white" style={{ backgroundColor: colorA }}>Winner</div>}
+          <div className="px-4 py-2.5 text-center" style={{ backgroundColor: `${colorA}12` }}>
+            <div className="text-2xl font-black" style={{ color: colorA }}>{scores.A}</div>
+            <div className="text-xs font-semibold text-gray-700 mt-0.5">{profA.label}</div>
+            <div className="text-[10px] text-gray-400">{profA.campaigns.length} campaigns · {profA.emails.length} replies</div>
+            {winner === 'A' && <div className="mt-1 inline-block text-[10px] font-bold px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: colorA }}>Winner</div>}
           </div>
-          <div className="p-5 text-center bg-gray-50 flex flex-col items-center justify-center">
-            <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest mb-1">Score</div>
-            <div className="text-4xl font-black text-gray-300">{scores.A} : {scores.B}</div>
-            {winner === null && <div className="mt-2 text-xs text-gray-400 font-medium">Tied</div>}
+          <div className="px-4 py-2.5 text-center bg-gray-50 flex flex-col items-center justify-center">
+            <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-0.5">Score</div>
+            <div className="text-3xl font-black text-gray-300">{scores.A} : {scores.B}</div>
+            {winner === null && <div className="text-[10px] text-gray-400 font-medium">Tied</div>}
           </div>
-          <div className="p-5 text-center" style={{ backgroundColor: `${colorB}12` }}>
-            <div className="text-3xl font-black" style={{ color: colorB }}>{scores.B}</div>
-            <div className="text-sm font-semibold text-gray-700 mt-1">{profB.label}</div>
-            <div className="text-[11px] text-gray-400 mt-0.5">{profB.campaigns.length} campaigns · {profB.emails.length} replies</div>
-            {winner === 'B' && <div className="mt-2 inline-block text-xs font-bold px-3 py-0.5 rounded-full text-white" style={{ backgroundColor: colorB }}>Winner</div>}
+          <div className="px-4 py-2.5 text-center" style={{ backgroundColor: `${colorB}12` }}>
+            <div className="text-2xl font-black" style={{ color: colorB }}>{scores.B}</div>
+            <div className="text-xs font-semibold text-gray-700 mt-0.5">{profB.label}</div>
+            <div className="text-[10px] text-gray-400">{profB.campaigns.length} campaigns · {profB.emails.length} replies</div>
+            {winner === 'B' && <div className="mt-1 inline-block text-[10px] font-bold px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: colorB }}>Winner</div>}
           </div>
         </div>
       </div>
@@ -1709,34 +1709,42 @@ function CompareTab({ filteredCampaigns, filteredEmails }: { filteredCampaigns: 
         {allMonths.length === 0 ? (
           <div className="py-12 text-center text-sm text-gray-400">No monthly data</div>
         ) : (
-          <div className="p-4 overflow-x-auto">
+          <div className="p-4">
             {(() => {
-              const BAR_W = 14; const GAP = 4; const GROUP_GAP = 16;
-              const GROUP_W = BAR_W * 2 + GAP;
-              const CHART_H = 160; const LABEL_H = 40;
-              const totalW = allMonths.length * (GROUP_W + GROUP_GAP) + GROUP_GAP;
+              // Use a fixed viewBox that fills available width via preserveAspectRatio
+              const n = allMonths.length;
+              const CHART_H = 160; const LABEL_H = 28; const PAD_L = 8; const PAD_R = 8;
+              // Each group occupies equal share of the viewBox width
+              const GROUP_W = 32; // bar group width in viewBox units
+              const GAP = 4;      // gap between A and B bars within group
+              const BAR_W = (GROUP_W - GAP) / 2;
+              const totalVW = PAD_L + n * GROUP_W + PAD_R;
               return (
-                <svg width={totalW} height={CHART_H + LABEL_H} style={{ minWidth: '100%', overflow: 'visible' }}>
+                <svg
+                  viewBox={`0 0 ${totalVW} ${CHART_H + LABEL_H}`}
+                  style={{ width: '100%', display: 'block' }}
+                  preserveAspectRatio="none"
+                >
                   {[0, 0.25, 0.5, 0.75, 1].map((frac) => (
-                    <line key={frac} x1={0} x2={totalW} y1={CHART_H * (1 - frac)} y2={CHART_H * (1 - frac)} stroke="#f3f4f6" strokeWidth={1} />
+                    <line key={frac} x1={0} x2={totalVW} y1={CHART_H * (1 - frac)} y2={CHART_H * (1 - frac)} stroke="#f3f4f6" strokeWidth={0.5} />
                   ))}
                   {allMonths.map((m, i) => {
                     const va = profA.byMonth.get(m)?.total ?? 0;
                     const vb = profB.byMonth.get(m)?.total ?? 0;
                     const hA = Math.round((va / maxMonthTotal) * CHART_H);
                     const hB = Math.round((vb / maxMonthTotal) * CHART_H);
-                    const x = GROUP_GAP + i * (GROUP_W + GROUP_GAP);
+                    const gx = PAD_L + i * GROUP_W;
                     return (
                       <g key={m}>
-                        <rect x={x} y={CHART_H - hA} width={BAR_W} height={hA} fill={colorA} rx={2} opacity={0.85} />
-                        <rect x={x + BAR_W + GAP} y={CHART_H - hB} width={BAR_W} height={hB} fill={colorB} rx={2} opacity={0.85} />
-                        {va > 0 && <text x={x + BAR_W / 2} y={CHART_H - hA - 3} textAnchor="middle" fontSize={8} fill={colorA} fontWeight={600}>{va}</text>}
-                        {vb > 0 && <text x={x + BAR_W + GAP + BAR_W / 2} y={CHART_H - hB - 3} textAnchor="middle" fontSize={8} fill={colorB} fontWeight={600}>{vb}</text>}
-                        <text x={x + GROUP_W / 2} y={CHART_H + 14} textAnchor="middle" fontSize={9} fill="#9ca3af">{monthToLabel(m)}</text>
+                        <rect x={gx} y={CHART_H - hA} width={BAR_W} height={hA} fill={colorA} rx={1.5} opacity={0.85} />
+                        <rect x={gx + BAR_W + GAP} y={CHART_H - hB} width={BAR_W} height={hB} fill={colorB} rx={1.5} opacity={0.85} />
+                        {va > 0 && <text x={gx + BAR_W / 2} y={CHART_H - hA - 2} textAnchor="middle" fontSize={6} fill={colorA} fontWeight={600}>{va}</text>}
+                        {vb > 0 && <text x={gx + BAR_W + GAP + BAR_W / 2} y={CHART_H - hB - 2} textAnchor="middle" fontSize={6} fill={colorB} fontWeight={600}>{vb}</text>}
+                        <text x={gx + GROUP_W / 2} y={CHART_H + 16} textAnchor="middle" fontSize={7} fill="#9ca3af">{monthToLabel(m)}</text>
                       </g>
                     );
                   })}
-                  <line x1={0} x2={totalW} y1={CHART_H} y2={CHART_H} stroke="#e5e7eb" strokeWidth={1} />
+                  <line x1={0} x2={totalVW} y1={CHART_H} y2={CHART_H} stroke="#e5e7eb" strokeWidth={0.5} />
                 </svg>
               );
             })()}
