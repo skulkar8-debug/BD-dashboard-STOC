@@ -113,16 +113,16 @@ export async function GET(req: Request) {
     }, { status: 400 });
   }
 
-  const settled = await Promise.allSettled(orgs.map(fetchOrgData));
-  const orgData: OrgData[] = settled.map((r, i) => {
-    if (r.status === 'fulfilled') return r.value;
-    return {
-      org: orgs[i],
-      campaigns: [],
-      emails: [],
-      errors: { campaigns: String((r as PromiseRejectedResult).reason) },
-    };
-  });
+  // Fetch orgs sequentially to avoid shared rate-limit collisions between
+  // orgs on the same Instantly account (e.g. My Org + AEG Vision share a pool)
+  const orgData: OrgData[] = [];
+  for (const org of orgs) {
+    try {
+      orgData.push(await fetchOrgData(org));
+    } catch (e) {
+      orgData.push({ org, campaigns: [], emails: [], errors: { campaigns: String(e) } });
+    }
+  }
 
   const data: BDData = {
     orgs: orgData,
