@@ -1455,9 +1455,9 @@ function AnalyticsTab({
 
 // ─── Compare ─────────────────────────────────────────────────────────────────
 
-// Only 2 colors used throughout the entire tab
+// Only 2 colors used throughout the entire tab: blue (A) and green (B/winner)
 const CA = '#3b82f6'; // blue  — sector A
-const CB = '#f97316'; // orange — sector B
+const CB = '#22c55e'; // green — sector B (also used for winner highlights)
 
 type SectorProfile = {
   label: string;
@@ -1659,6 +1659,11 @@ function CompareTab({ filteredCampaigns, filteredEmails }: { filteredCampaigns: 
         </div>
       </div>
 
+      {/* Score explanation */}
+      <div className="text-[11px] text-gray-400 -mt-2 px-1">
+        Score = number of metrics won out of 4: <span className="font-medium text-gray-500">Positive Reply Rate · Positive Replies · Total Replies · Opportunities</span>. Higher is better for all except Bounces (lower is better, counted separately).
+      </div>
+
       {/* KPI grid */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <CmpKpi label="Positive Replies" a={profA.positive.length} b={profB.positive.length} />
@@ -1670,7 +1675,22 @@ function CompareTab({ filteredCampaigns, filteredEmails }: { filteredCampaigns: 
         <CmpKpi label="Sent (all-time)" a={profA.sent} b={profB.sent} />
         <CmpKpi label="Human Replies" a={profA.human.length} b={profB.human.length} />
         <CmpKpi label="Campaigns" a={profA.campaigns.length} b={profB.campaigns.length} />
-        <CmpKpi label="Bounces" a={profA.campaigns.reduce((s, c) => s + c.bounces, 0)} b={profB.campaigns.reduce((s, c) => s + c.bounces, 0)} higherBetter={false} />
+        <CmpKpi label="Bounces (all-time)" a={profA.campaigns.reduce((s, c) => s + c.bounces, 0)} b={profB.campaigns.reduce((s, c) => s + c.bounces, 0)} higherBetter={false} />
+      </div>
+
+      {/* Dual heatmaps side by side — MOVED TO TOP */}
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 text-sm font-semibold text-gray-700">State Heatmap — Positive Replies</div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-gray-100">
+          <div>
+            <div className="px-4 py-2 text-xs font-bold border-b border-gray-100" style={{ color: CA, backgroundColor: `${CA}0d` }}>A — {profA.label}</div>
+            <CompareHeatMap byState={profA.byState} color="blue" label={profA.label} />
+          </div>
+          <div>
+            <div className="px-4 py-2 text-xs font-bold border-b border-gray-100" style={{ color: CB, backgroundColor: `${CB}0d` }}>B — {profB.label}</div>
+            <CompareHeatMap byState={profB.byState} color="green" label={profB.label} />
+          </div>
+        </div>
       </div>
 
       {/* Monthly grouped bar chart */}
@@ -1782,21 +1802,6 @@ function CompareTab({ filteredCampaigns, filteredEmails }: { filteredCampaigns: 
                 ))}
               </div>
             ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Dual heatmaps side by side */}
-      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 text-sm font-semibold text-gray-700">State Heatmap — Positive Replies</div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-gray-100">
-          <div>
-            <div className="px-4 py-2 text-xs font-bold border-b border-gray-100" style={{ color: CA, backgroundColor: `${CA}0d` }}>A — {profA.label}</div>
-            <CompareHeatMap byState={profA.byState} color={CA} label={profA.label} />
-          </div>
-          <div>
-            <div className="px-4 py-2 text-xs font-bold border-b border-gray-100" style={{ color: CB, backgroundColor: `${CB}0d` }}>B — {profB.label}</div>
-            <CompareHeatMap byState={profB.byState} color={CB} label={profB.label} />
           </div>
         </div>
       </div>
