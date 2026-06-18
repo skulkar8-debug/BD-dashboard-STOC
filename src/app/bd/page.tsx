@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { useBDData } from '@/hooks/useBDData';
 import { FilterBar } from '@/components/bd/FilterBar';
@@ -9,9 +9,10 @@ import { StatusBadge } from '@/components/bd/Badge';
 import { CLASSIFICATION_LABELS } from '@/lib/instantly/types';
 import type { NormalizedCampaign, NormalizedEmail, BDData } from '@/lib/instantly/types';
 import { exportCampaignsCsv, exportEmailsCsv, downloadCsv } from '@/lib/instantly/export';
+import { SECTOR_OPTIONS } from '@/config/campaign-sector-map';
 import {
   Loader2, RefreshCw, AlertTriangle, Bug, BarChart3,
-  Calendar, Layers, MapPin, Table2, Inbox, TrendingUp, ChevronDown, ChevronRight,
+  Calendar, Layers, MapPin, Table2, Inbox, TrendingUp, ChevronDown, ChevronRight, GitCompare,
 } from 'lucide-react';
 // Note: Calendar, TrendingUp kept for potential future use
 import Image from 'next/image';
@@ -33,6 +34,7 @@ const TABS = [
   { id: 'overview',  label: 'Overview',   icon: <BarChart3 className="h-3.5 w-3.5" /> },
   { id: 'sectors',   label: 'Sectors',    icon: <Layers className="h-3.5 w-3.5" /> },
   { id: 'states',    label: 'States',     icon: <MapPin className="h-3.5 w-3.5" /> },
+  { id: 'compare',   label: 'Compare',    icon: <GitCompare className="h-3.5 w-3.5" /> },
   { id: 'inbox',     label: 'Inbox',      icon: <Inbox className="h-3.5 w-3.5" /> },
   { id: 'analytics', label: 'Analytics',  icon: <TrendingUp className="h-3.5 w-3.5" /> },
   { id: 'debug',     label: 'Debug',      icon: <Bug className="h-3.5 w-3.5" /> },
@@ -1451,6 +1453,543 @@ function AnalyticsTab({
   );
 }
 
+// ─── Compare ─────────────────────────────────────────────────────────────────
+
+type SectorProfile = {
+  label: string;
+  campaigns: NormalizedCampaign[];
+  emails: NormalizedEmail[];
+  positive: NormalizedEmail[];
+  human: NormalizedEmail[];
+  sent: number;
+  byState: Map<string, { replies: number; positive: number }>;
+  byMonth: Map<string, { total: number; positive: number; meetings: number; more_info: number; referral: number; neutral: number; not_interested: number; unsub: number; ooo: number; auto: number; bounce: number }>;
+  byClass: Map<string, number>;
+};
+
+function buildProfile(sector: string, allCampaigns: NormalizedCampaign[], allEmails: NormalizedEmail[]): SectorProfile {
+  const campaigns = allCampaigns.filter((c) => c.sector === sector);
+  const emails = allEmails.filter((e) => e.sector === sector);
+  const positive = emails.filter((e) => e.is_positive);
+  const human = emails.filter((e) => !e.is_auto_reply && e.final_classification !== 'unsubscribe');
+  const sent = campaigns.reduce((s, c) => s + c.sent, 0);
+
+  const byState = new Map<string, { replies: number; positive: number }>();
+  emails.forEach((e) => {
+    if (!e.state || e.state === 'Unmapped') return;
+    const cur = byState.get(e.state) ?? { replies: 0, positive: 0 };
+    cur.replies++;
+    if (e.is_positive) cur.positive++;
+    byState.set(e.state, cur);
+  });
+
+  const byMonth = new Map<string, { total: number; positive: number; meetings: number; more_info: number; referral: number; neutral: number; not_interested: number; unsub: number; ooo: number; auto: number; bounce: number }>();
+  emails.forEach((e) => {
+    if (!e.timestamp_email || e.timestamp_email.length < 7) return;
+    const key = e.timestamp_email.slice(0, 7);
+    const z = byMonth.get(key) ?? { total: 0, positive: 0, meetings: 0, more_info: 0, referral: 0, neutral: 0, not_interested: 0, unsub: 0, ooo: 0, auto: 0, bounce: 0 };
+    z.total++;
+    const cls = e.final_classification;
+    if (cls === 'positive_interested')   z.positive++;
+    else if (cls === 'meeting_requested')    z.meetings++;
+    else if (cls === 'more_info_requested')  z.more_info++;
+    else if (cls === 'referral_given')       z.referral++;
+    else if (cls === 'neutral_needs_review') z.neutral++;
+    else if (cls === 'not_interested')       z.not_interested++;
+    else if (cls === 'unsubscribe')          z.unsub++;
+    else if (cls === 'out_of_office')        z.ooo++;
+    else if (cls === 'auto_reply')           z.auto++;
+    else if (cls === 'bounce')               z.bounce++;
+    byMonth.set(key, z);
+  });
+
+  const byClass = new Map<string, number>();
+  emails.forEach((e) => {
+    byClass.set(e.final_classification, (byClass.get(e.final_classification) ?? 0) + 1);
+  });
+
+  return { label: sector, campaigns, emails, positive, human, sent, byState, byMonth, byClass };
+}
+
+const SIDE_COLORS = { A: '#3b82f6', B: '#f59e0b' } as const;
+const SIDE_BG = { A: 'bg-blue-50', B: 'bg-amber-50' } as const;
+const SIDE_BORDER = { A: 'border-blue-200', B: 'border-amber-200' } as const;
+const SIDE_TEXT = { A: 'text-blue-700', B: 'text-amber-700' } as const;
+const SIDE_BADGE = { A: 'bg-blue-600', B: 'bg-amber-500' } as const;
+
+function WinBadge({ side }: { side: 'A' | 'B' | null }) {
+  if (!side) return null;
+  return (
+    <span className={`ml-1.5 text-[10px] font-bold text-white px-1.5 py-0.5 rounded ${SIDE_BADGE[side]}`}>
+      {side}
+    </span>
+  );
+}
+
+function CmpKpi({
+  label, a, b, aRaw, bRaw, higherBetter = true, fmt: fmtFn,
+}: {
+  label: string;
+  a: number; b: number; aRaw?: number; bRaw?: number;
+  higherBetter?: boolean;
+  fmt?: (n: number) => string;
+}) {
+  const f = fmtFn ?? ((n: number) => n.toLocaleString());
+  const winner: 'A' | 'B' | null =
+    a === b ? null : (higherBetter ? (a > b ? 'A' : 'B') : (a < b ? 'A' : 'B'));
+  const aMax = Math.max(a, b, 1);
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 space-y-2">
+      <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">{label}</div>
+      <div className="flex items-end justify-between gap-3">
+        <div className="flex-1 space-y-1">
+          <div className={`text-xl font-bold tabular-nums ${SIDE_TEXT.A} flex items-center`}>
+            {f(a)} {winner === 'A' && <WinBadge side="A" />}
+          </div>
+          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+            <div className="h-full rounded-full transition-all" style={{ width: `${(a / aMax) * 100}%`, backgroundColor: SIDE_COLORS.A }} />
+          </div>
+          {aRaw !== undefined && <div className="text-[10px] text-gray-400">{f(aRaw)} raw</div>}
+        </div>
+        <div className="text-gray-200 font-light text-lg">|</div>
+        <div className="flex-1 space-y-1 text-right">
+          <div className={`text-xl font-bold tabular-nums ${SIDE_TEXT.B} flex items-center justify-end`}>
+            {winner === 'B' && <WinBadge side="B" />} {f(b)}
+          </div>
+          <div className="h-2 bg-gray-100 rounded-full overflow-hidden flex justify-end">
+            <div className="h-full rounded-full transition-all" style={{ width: `${(b / aMax) * 100}%`, backgroundColor: SIDE_COLORS.B }} />
+          </div>
+          {bRaw !== undefined && <div className="text-[10px] text-gray-400">{f(bRaw)} raw</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CompareTab({ allCampaigns, allEmails }: { allCampaigns: NormalizedCampaign[]; allEmails: NormalizedEmail[] }) {
+  const sectorList = useMemo(() => {
+    const present = new Set(allCampaigns.map((c) => c.sector));
+    return SECTOR_OPTIONS.filter((s) => present.has(s) && s !== 'Other / Unmapped');
+  }, [allCampaigns]);
+
+  const [sectorA, setSectorA] = useState<string>(sectorList[0] ?? '');
+  const [sectorB, setSectorB] = useState<string>(sectorList[1] ?? '');
+
+  const profA = useMemo(() => sectorA ? buildProfile(sectorA, allCampaigns, allEmails) : null, [sectorA, allCampaigns, allEmails]);
+  const profB = useMemo(() => sectorB ? buildProfile(sectorB, allCampaigns, allEmails) : null, [sectorB, allCampaigns, allEmails]);
+
+  const allMonths = useMemo(() => {
+    const s = new Set([
+      ...(profA ? [...profA.byMonth.keys()] : []),
+      ...(profB ? [...profB.byMonth.keys()] : []),
+    ]);
+    return [...s].filter((m) => m !== 'Unknown').sort();
+  }, [profA, profB]);
+
+  const allStates = useMemo(() => {
+    const s = new Set([
+      ...(profA ? [...profA.byState.keys()] : []),
+      ...(profB ? [...profB.byState.keys()] : []),
+    ]);
+    return [...s].sort();
+  }, [profA, profB]);
+
+  const allClasses = useMemo(() => {
+    const s = new Set([
+      ...(profA ? [...profA.byClass.keys()] : []),
+      ...(profB ? [...profB.byClass.keys()] : []),
+    ]);
+    return [...s].sort((a, b) => {
+      const POSITIVE = ['positive_interested','meeting_requested','referral_given','more_info_requested'];
+      const aPos = POSITIVE.includes(a); const bPos = POSITIVE.includes(b);
+      if (aPos !== bPos) return aPos ? -1 : 1;
+      return a.localeCompare(b);
+    });
+  }, [profA, profB]);
+
+  const maxMonthTotal = useMemo(() => {
+    let m = 1;
+    allMonths.forEach((k) => {
+      m = Math.max(m, profA?.byMonth.get(k)?.total ?? 0, profB?.byMonth.get(k)?.total ?? 0);
+    });
+    return m;
+  }, [allMonths, profA, profB]);
+
+  const maxStatePos = useMemo(() => {
+    let m = 1;
+    allStates.forEach((s) => {
+      m = Math.max(m, profA?.byState.get(s)?.positive ?? 0, profB?.byState.get(s)?.positive ?? 0);
+    });
+    return m;
+  }, [allStates, profA, profB]);
+
+  const topCampsA = useMemo(() => profA ? [...profA.campaigns].sort((a, b) => b.positive_reply_count - a.positive_reply_count).slice(0, 5) : [], [profA]);
+  const topCampsB = useMemo(() => profB ? [...profB.campaigns].sort((a, b) => b.positive_reply_count - a.positive_reply_count).slice(0, 5) : [], [profB]);
+
+  const posRateA = profA && profA.human.length > 0 ? profA.positive.length / profA.human.length * 100 : 0;
+  const posRateB = profB && profB.human.length > 0 ? profB.positive.length / profB.human.length * 100 : 0;
+  const replyRateA = profA && profA.sent > 0 ? profA.emails.length / profA.sent * 100 : 0;
+  const replyRateB = profB && profB.sent > 0 ? profB.emails.length / profB.sent * 100 : 0;
+
+  if (!profA || !profB) {
+    return (
+      <div className="text-center py-16 text-gray-400 text-sm">Select two sectors above to compare</div>
+    );
+  }
+
+  const sectorSelector = (
+    <div className="bg-white border border-gray-200 rounded-xl px-5 py-4 shadow-sm">
+      <div className="flex flex-wrap items-center gap-4">
+        <span className="text-sm font-semibold text-gray-600">Compare sectors:</span>
+        <div className="flex items-center gap-2">
+          <span className={`text-xs font-bold px-2 py-0.5 rounded ${SIDE_BADGE.A} text-white`}>A</span>
+          <select value={sectorA} onChange={(e) => setSectorA(e.target.value)}
+            className={`text-sm rounded-lg border ${SIDE_BORDER.A} ${SIDE_TEXT.A} bg-blue-50 font-medium px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400`}>
+            {sectorList.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        <span className="text-gray-300 text-lg font-light">vs</span>
+        <div className="flex items-center gap-2">
+          <span className={`text-xs font-bold px-2 py-0.5 rounded ${SIDE_BADGE.B} text-white`}>B</span>
+          <select value={sectorB} onChange={(e) => setSectorB(e.target.value)}
+            className={`text-sm rounded-lg border ${SIDE_BORDER.B} ${SIDE_TEXT.B} bg-amber-50 font-medium px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-400`}>
+            {sectorList.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        <div className="ml-auto text-[11px] text-gray-400 italic">Using all-time data (not date-filtered)</div>
+      </div>
+    </div>
+  );
+
+  // ── Scoreboard banner ──────────────────────────────────────────────────────
+  const scores = { A: 0, B: 0 };
+  const metrics = [
+    { val: posRateA, valB: posRateB },
+    { val: profA.positive.length, valB: profB.positive.length },
+    { val: profA.emails.length, valB: profB.emails.length },
+    { val: profA.campaigns.length, valB: profB.campaigns.length },
+    { val: profA.campaigns.reduce((s, c) => s + c.opportunities, 0), valB: profB.campaigns.reduce((s, c) => s + c.opportunities, 0) },
+  ];
+  metrics.forEach(({ val, valB }) => {
+    if (val > valB) scores.A++;
+    else if (valB > val) scores.B++;
+  });
+  const overallWinner: 'A' | 'B' | null = scores.A > scores.B ? 'A' : scores.B > scores.A ? 'B' : null;
+
+  return (
+    <div className="space-y-5">
+      {sectorSelector}
+
+      {/* Scoreboard */}
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+        <div className="grid grid-cols-3 divide-x divide-gray-100">
+          <div className={`p-5 text-center ${SIDE_BG.A}`}>
+            <div className={`text-3xl font-black ${SIDE_TEXT.A}`}>{scores.A}</div>
+            <div className="text-sm font-semibold text-gray-600 mt-0.5">{profA.label}</div>
+            <div className="text-[11px] text-gray-400 mt-1">{profA.campaigns.length} campaigns · {profA.emails.length} replies</div>
+            {overallWinner === 'A' && <div className={`mt-2 inline-block text-xs font-bold px-3 py-0.5 rounded-full ${SIDE_BADGE.A} text-white`}>Winner</div>}
+          </div>
+          <div className="p-5 text-center bg-gray-50 flex flex-col items-center justify-center">
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Score</div>
+            <div className="text-4xl font-black text-gray-300">{scores.A} : {scores.B}</div>
+            <div className="text-[10px] text-gray-400 mt-1">{metrics.length} metrics measured</div>
+            {overallWinner === null && <div className="mt-2 text-xs text-gray-400 font-medium">Tied</div>}
+          </div>
+          <div className={`p-5 text-center ${SIDE_BG.B}`}>
+            <div className={`text-3xl font-black ${SIDE_TEXT.B}`}>{scores.B}</div>
+            <div className="text-sm font-semibold text-gray-600 mt-0.5">{profB.label}</div>
+            <div className="text-[11px] text-gray-400 mt-1">{profB.campaigns.length} campaigns · {profB.emails.length} replies</div>
+            {overallWinner === 'B' && <div className={`mt-2 inline-block text-xs font-bold px-3 py-0.5 rounded-full ${SIDE_BADGE.B} text-white`}>Winner</div>}
+          </div>
+        </div>
+      </div>
+
+      {/* KPI grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <CmpKpi label="Positive Replies" a={profA.positive.length} b={profB.positive.length} />
+        <CmpKpi label="Actionable Rate" a={posRateA} b={posRateB}
+          fmt={(n) => n.toFixed(1) + '%'} />
+        <CmpKpi label="Total Replies" a={profA.emails.length} b={profB.emails.length} />
+        <CmpKpi label="Campaigns" a={profA.campaigns.length} b={profB.campaigns.length} />
+        <CmpKpi label="Opportunities" a={profA.campaigns.reduce((s, c) => s + c.opportunities, 0)} b={profB.campaigns.reduce((s, c) => s + c.opportunities, 0)} />
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <CmpKpi label="Sent (all-time)" a={profA.sent} b={profB.sent} />
+        <CmpKpi label="Reply Rate" a={replyRateA} b={replyRateB} fmt={(n) => n.toFixed(1) + '%'} />
+        <CmpKpi label="Human Replies" a={profA.human.length} b={profB.human.length} />
+        <CmpKpi label="Bounces" a={profA.campaigns.reduce((s, c) => s + c.bounces, 0)} b={profB.campaigns.reduce((s, c) => s + c.bounces, 0)} higherBetter={false} />
+      </div>
+
+      {/* Monthly trend — side-by-side stacked bars */}
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between flex-wrap gap-2">
+          <span className="text-sm font-semibold text-gray-700">Monthly Reply Volume</span>
+          <div className="flex items-center gap-4 text-[11px] text-gray-500">
+            <span className="flex items-center gap-1"><span className="w-3 h-1.5 rounded-full inline-block" style={{ backgroundColor: SIDE_COLORS.A }} /> {profA.label}</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-1.5 rounded-full inline-block" style={{ backgroundColor: SIDE_COLORS.B }} /> {profB.label}</span>
+          </div>
+        </div>
+        <div className="px-4 py-4 space-y-2">
+          {allMonths.length === 0 && <div className="text-sm text-gray-400 text-center py-4">No monthly data</div>}
+          {allMonths.map((m) => {
+            const va = profA.byMonth.get(m)?.total ?? 0;
+            const vb = profB.byMonth.get(m)?.total ?? 0;
+            const posA = profA.byMonth.get(m)?.positive ?? 0;
+            const posB = profB.byMonth.get(m)?.positive ?? 0;
+            const qA = (profA.byMonth.get(m)?.meetings ?? 0) + (profA.byMonth.get(m)?.more_info ?? 0) + (profA.byMonth.get(m)?.referral ?? 0);
+            const qB = (profB.byMonth.get(m)?.meetings ?? 0) + (profB.byMonth.get(m)?.more_info ?? 0) + (profB.byMonth.get(m)?.referral ?? 0);
+            return (
+              <div key={m} className="flex items-center gap-3">
+                <div className="text-xs text-gray-500 font-medium w-14 text-right tabular-nums">{monthToLabel(m)}</div>
+                <div className="flex-1 grid grid-rows-2 gap-0.5">
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIDE_COLORS.A }} />
+                    <div className="flex-1 h-3 bg-gray-100 rounded-sm overflow-hidden">
+                      <div className="h-full rounded-sm flex">
+                        <div style={{ width: `${((posA + qA) / maxMonthTotal) * 100}%`, backgroundColor: '#34d399' }} className="h-full" />
+                        <div style={{ width: `${(Math.max(va - posA - qA, 0) / maxMonthTotal) * 100}%`, backgroundColor: SIDE_COLORS.A, opacity: 0.3 }} className="h-full" />
+                      </div>
+                    </div>
+                    <div className="text-[10px] text-gray-500 tabular-nums w-20 flex-shrink-0">
+                      <span className="text-emerald-600 font-semibold">{posA + qA}</span>/{va}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIDE_COLORS.B }} />
+                    <div className="flex-1 h-3 bg-gray-100 rounded-sm overflow-hidden">
+                      <div className="h-full rounded-sm flex">
+                        <div style={{ width: `${((posB + qB) / maxMonthTotal) * 100}%`, backgroundColor: '#34d399' }} className="h-full" />
+                        <div style={{ width: `${(Math.max(vb - posB - qB, 0) / maxMonthTotal) * 100}%`, backgroundColor: SIDE_COLORS.B, opacity: 0.3 }} className="h-full" />
+                      </div>
+                    </div>
+                    <div className="text-[10px] text-gray-500 tabular-nums w-20 flex-shrink-0">
+                      <span className="text-emerald-600 font-semibold">{posB + qB}</span>/{vb}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Reply classification + Best campaigns side-by-side */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        {/* Reply breakdown */}
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 text-sm font-semibold text-gray-700">Reply Classification Breakdown</div>
+          <div className="p-4 space-y-3">
+            {allClasses.map((cls) => {
+              const va = profA.byClass.get(cls) ?? 0;
+              const vb = profB.byClass.get(cls) ?? 0;
+              const maxV = Math.max(va, vb, 1);
+              const POSITIVE_CLS = ['positive_interested','meeting_requested','referral_given','more_info_requested'];
+              const isPos = POSITIVE_CLS.includes(cls);
+              const label = CLASSIFICATION_LABELS[cls as keyof typeof CLASSIFICATION_LABELS] ?? cls;
+              return (
+                <div key={cls} className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs font-medium ${isPos ? 'text-emerald-700' : 'text-gray-600'}`}>{label}</span>
+                    <div className="flex items-center gap-3 text-[11px] tabular-nums">
+                      <span className={SIDE_TEXT.A + ' font-semibold'}>{va}</span>
+                      <span className="text-gray-300">·</span>
+                      <span className={SIDE_TEXT.B + ' font-semibold'}>{vb}</span>
+                    </div>
+                  </div>
+                  <div className="grid grid-rows-2 gap-0.5">
+                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-full rounded-full" style={{ width: `${(va / maxV) * 100}%`, backgroundColor: isPos ? '#10b981' : SIDE_COLORS.A, opacity: isPos ? 1 : 0.6 }} />
+                    </div>
+                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-full rounded-full" style={{ width: `${(vb / maxV) * 100}%`, backgroundColor: isPos ? '#10b981' : SIDE_COLORS.B, opacity: isPos ? 1 : 0.7 }} />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Best campaigns */}
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 text-sm font-semibold text-gray-700">Top Campaigns by Positive Replies</div>
+          <div className="divide-y divide-gray-50">
+            <div className="grid grid-cols-2 divide-x divide-gray-100">
+              {/* Side A */}
+              <div>
+                <div className={`px-3 py-2 text-xs font-bold ${SIDE_TEXT.A} ${SIDE_BG.A} border-b border-gray-100`}>{profA.label}</div>
+                {topCampsA.length === 0 && <div className="px-3 py-4 text-xs text-gray-400 text-center">No data</div>}
+                {topCampsA.map((c, i) => (
+                  <div key={c.campaign_id} className="px-3 py-2.5 border-b border-gray-50 last:border-0">
+                    <div className="flex items-start gap-2">
+                      <span className="text-[10px] text-gray-300 font-mono mt-0.5">{i + 1}</span>
+                      <div className="min-w-0">
+                        <div className="text-xs font-medium text-gray-800 leading-tight" title={c.campaign_name}>{c.campaign_name}</div>
+                        <div className="text-[10px] text-gray-400 mt-0.5">{c.state} · {c.campaign_status}</div>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-emerald-600 font-bold text-xs">{c.positive_reply_count} pos</span>
+                          <span className="text-gray-300">·</span>
+                          <span className="text-gray-400 text-[10px]">{c.actual_received_count} replies</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {/* Side B */}
+              <div>
+                <div className={`px-3 py-2 text-xs font-bold ${SIDE_TEXT.B} ${SIDE_BG.B} border-b border-gray-100`}>{profB.label}</div>
+                {topCampsB.length === 0 && <div className="px-3 py-4 text-xs text-gray-400 text-center">No data</div>}
+                {topCampsB.map((c, i) => (
+                  <div key={c.campaign_id} className="px-3 py-2.5 border-b border-gray-50 last:border-0">
+                    <div className="flex items-start gap-2">
+                      <span className="text-[10px] text-gray-300 font-mono mt-0.5">{i + 1}</span>
+                      <div className="min-w-0">
+                        <div className="text-xs font-medium text-gray-800 leading-tight" title={c.campaign_name}>{c.campaign_name}</div>
+                        <div className="text-[10px] text-gray-400 mt-0.5">{c.state} · {c.campaign_status}</div>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-emerald-600 font-bold text-xs">{c.positive_reply_count} pos</span>
+                          <span className="text-gray-300">·</span>
+                          <span className="text-gray-400 text-[10px]">{c.actual_received_count} replies</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* State comparison — table + mini visual */}
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between flex-wrap gap-2">
+          <span className="text-sm font-semibold text-gray-700">State Performance Comparison</span>
+          <div className="flex items-center gap-4 text-[11px] text-gray-500">
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ backgroundColor: SIDE_COLORS.A }} />{profA.label}</span>
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ backgroundColor: SIDE_COLORS.B }} />{profB.label}</span>
+          </div>
+        </div>
+
+        {/* Visual bars per state */}
+        <div className="px-4 py-4 space-y-2.5">
+          {allStates.slice(0, 20).map((state) => {
+            const sa = profA.byState.get(state);
+            const sb = profB.byState.get(state);
+            const pa = sa?.positive ?? 0;
+            const pb = sb?.positive ?? 0;
+            const winner: 'A' | 'B' | null = pa > pb ? 'A' : pb > pa ? 'B' : null;
+            return (
+              <div key={state} className="flex items-center gap-3">
+                <div className="w-24 text-xs text-gray-600 font-medium truncate flex-shrink-0 text-right">{state}</div>
+                <div className="flex-1 grid grid-rows-2 gap-0.5">
+                  <div className="flex items-center gap-1">
+                    <div className="flex-1 h-3 bg-gray-100 rounded-sm overflow-hidden">
+                      <div className="h-full rounded-sm" style={{ width: `${((sa?.positive ?? 0) / maxStatePos) * 100}%`, backgroundColor: SIDE_COLORS.A }} />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="flex-1 h-3 bg-gray-100 rounded-sm overflow-hidden">
+                      <div className="h-full rounded-sm" style={{ width: `${((sb?.positive ?? 0) / maxStatePos) * 100}%`, backgroundColor: SIDE_COLORS.B }} />
+                    </div>
+                  </div>
+                </div>
+                <div className="w-40 flex-shrink-0 text-[11px] space-y-0.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`font-semibold tabular-nums ${SIDE_TEXT.A}`}>{pa} pos</span>
+                    <span className="text-gray-300">/{sa?.replies ?? 0}</span>
+                    {sa && sa.replies > 0 && <span className="text-gray-400">({(pa / sa.replies * 100).toFixed(0)}%)</span>}
+                    {winner === 'A' && <span className={`text-[9px] font-bold px-1 py-px rounded ${SIDE_BADGE.A} text-white`}>A</span>}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className={`font-semibold tabular-nums ${SIDE_TEXT.B}`}>{pb} pos</span>
+                    <span className="text-gray-300">/{sb?.replies ?? 0}</span>
+                    {sb && sb.replies > 0 && <span className="text-gray-400">({(pb / sb.replies * 100).toFixed(0)}%)</span>}
+                    {winner === 'B' && <span className={`text-[9px] font-bold px-1 py-px rounded ${SIDE_BADGE.B} text-white`}>B</span>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* State table */}
+        {allStates.length > 0 && (
+          <div className="border-t border-gray-100 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-100 text-[10px] text-gray-400 uppercase tracking-wide">
+                  <th className="text-left px-4 py-2">State</th>
+                  <th className="text-right px-3 py-2" style={{ color: SIDE_COLORS.A }}>A Replies</th>
+                  <th className="text-right px-3 py-2" style={{ color: SIDE_COLORS.A }}>A Positive</th>
+                  <th className="text-right px-3 py-2" style={{ color: SIDE_COLORS.A }}>A Pos%</th>
+                  <th className="text-right px-3 py-2" style={{ color: SIDE_COLORS.B }}>B Replies</th>
+                  <th className="text-right px-3 py-2" style={{ color: SIDE_COLORS.B }}>B Positive</th>
+                  <th className="text-right px-3 py-2" style={{ color: SIDE_COLORS.B }}>B Pos%</th>
+                  <th className="text-right px-3 py-2">Winner</th>
+                </tr>
+              </thead>
+              <tbody>
+                {allStates.map((state) => {
+                  const sa = profA.byState.get(state);
+                  const sb = profB.byState.get(state);
+                  const pa = sa?.positive ?? 0; const pb = sb?.positive ?? 0;
+                  const rateA = sa && sa.replies > 0 ? (pa / sa.replies * 100).toFixed(1) + '%' : '—';
+                  const rateB = sb && sb.replies > 0 ? (pb / sb.replies * 100).toFixed(1) + '%' : '—';
+                  const winner: 'A' | 'B' | null = pa > pb ? 'A' : pb > pa ? 'B' : null;
+                  return (
+                    <tr key={state} className="border-b border-gray-50 hover:bg-gray-50">
+                      <td className="px-4 py-1.5 font-medium text-gray-700">{state}</td>
+                      <td className="text-right px-3 py-1.5">{sa?.replies ?? '—'}</td>
+                      <td className={`text-right px-3 py-1.5 font-semibold`} style={{ color: SIDE_COLORS.A }}>{pa || '—'}</td>
+                      <td className="text-right px-3 py-1.5 text-gray-500">{rateA}</td>
+                      <td className="text-right px-3 py-1.5">{sb?.replies ?? '—'}</td>
+                      <td className={`text-right px-3 py-1.5 font-semibold`} style={{ color: SIDE_COLORS.B }}>{pb || '—'}</td>
+                      <td className="text-right px-3 py-1.5 text-gray-500">{rateB}</td>
+                      <td className="text-right px-3 py-1.5">
+                        {winner && (
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded text-white ${SIDE_BADGE[winner]}`}>{winner}</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Map — shows both sectors on US map color-coded */}
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between flex-wrap gap-2">
+          <span className="text-sm font-semibold text-gray-700">State Map — Both Sectors</span>
+          <div className="flex items-center gap-4 text-[11px]">
+            <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded inline-block border" style={{ backgroundColor: SIDE_COLORS.A, opacity: 0.7 }} />{profA.label}</span>
+            <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded inline-block border" style={{ backgroundColor: SIDE_COLORS.B, opacity: 0.7 }} />{profB.label}</span>
+            <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded inline-block border" style={{ backgroundColor: '#7c3aed', opacity: 0.75 }} />Both active</span>
+          </div>
+        </div>
+        <CompareMap labelA={profA.label} labelB={profB.label} byStateA={profA.byState} byStateB={profB.byState} />
+      </div>
+    </div>
+  );
+}
+
+// ─── Compare Map (Leaflet, SSR-disabled) ─────────────────────────────────────
+
+const CompareMap = dynamic(
+  () => import('@/components/bd/CompareMap'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-[420px] flex items-center justify-center text-sm text-gray-400">Loading map…</div>
+    ),
+  }
+);
+
 // ─── Debug ────────────────────────────────────────────────────────────────────
 
 type DebugOrg = {
@@ -1645,6 +2184,7 @@ export default function BDDashboard() {
             {tab === 'overview'  && <OverviewTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} stats={bd.stats} analyticsAvailable={bd.stats.analyticsAvailable} isFiltered={isFiltered} campaignStats={bd.campaignStats} />}
             {tab === 'sectors'   && <SectorsTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} isFiltered={isFiltered} campaignStats={bd.campaignStats} />}
             {tab === 'states'    && <StatesTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} isFiltered={isFiltered} />}
+            {tab === 'compare'   && <CompareTab allCampaigns={bd.allCampaigns} allEmails={bd.allEmails} />}
             {tab === 'inbox'     && <InboxTab emails={bd.filteredEmails} />}
             {tab === 'analytics' && <AnalyticsTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} campaignStats={bd.campaignStats} />}
             {tab === 'debug'     && <DebugTab data={bd.data} />}
