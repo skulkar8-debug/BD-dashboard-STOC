@@ -1,4 +1,4 @@
-import { getISOWeek, getISOWeekYear, parseISO, isValid } from 'date-fns';
+import { getISOWeek, getISOWeekYear, parseISO, isValid, format } from 'date-fns';
 import type {
   InstantlyCampaign,
   InstantlyAnalytics,
@@ -120,7 +120,19 @@ export function resolveMapping(
   return { sector, state: parsed.parsed_state, region: '', bd_owner: '' };
 }
 
-// ─── Week helper ──────────────────────────────────────────────────────────────
+// ─── Date helpers ─────────────────────────────────────────────────────────────
+
+// Returns local YYYY-MM-DD for a UTC ISO timestamp — used for date-range filtering
+// so that early-morning emails (e.g. IST +5:30) aren't excluded by UTC date mismatch.
+function toLocalDate(isoString: string): string {
+  try {
+    const d = parseISO(isoString);
+    if (!isValid(d)) return '';
+    return format(d, 'yyyy-MM-dd');
+  } catch {
+    return '';
+  }
+}
 
 function toWeek(isoString: string): string {
   try {
@@ -283,6 +295,7 @@ export function normalizeEmail(
     region,
     bd_owner,
     timestamp_email: email.timestamp_email,
+    date_local: toLocalDate(email.timestamp_email),
     week: toWeek(email.timestamp_email),
     subject: email.subject ?? '',
     content_preview: email.content_preview ?? bodyText.slice(0, 200),

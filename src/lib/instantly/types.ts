@@ -160,6 +160,7 @@ export type NormalizedEmail = {
   region: string;
   bd_owner: string;
   timestamp_email: string;
+  date_local: string;   // local YYYY-MM-DD for date-range filtering (avoids UTC offset bugs)
   week: string;
   subject: string;
   content_preview: string;

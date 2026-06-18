@@ -112,8 +112,8 @@ export function useBDData() {
       if (filters.sector && e.sector !== filters.sector) return false;
       if (filters.state && e.state !== filters.state) return false;
       if (filters.campaign && e.campaign_id !== filters.campaign) return false;
-      if (filters.from_date && e.timestamp_email < filters.from_date) return false;
-      if (filters.to_date && e.timestamp_email > filters.to_date + 'T23:59:59') return false;
+      if (filters.from_date && e.date_local < filters.from_date) return false;
+      if (filters.to_date && e.date_local > filters.to_date) return false;
       return true;
     });
   }, [allEmails, filters.org, filters.sector, filters.state, filters.campaign, filters.from_date, filters.to_date]);
@@ -146,8 +146,8 @@ export function useBDData() {
       if (filters.sector && e.sector !== filters.sector) return false;
       if (filters.state && e.state !== filters.state) return false;
       if (filters.campaign && e.campaign_id !== filters.campaign) return false;
-      if (filters.from_date && e.timestamp_email < filters.from_date) return false;
-      if (filters.to_date && e.timestamp_email > filters.to_date + 'T23:59:59') return false;
+      if (filters.from_date && e.date_local < filters.from_date) return false;
+      if (filters.to_date && e.date_local > filters.to_date) return false;
       return true;
     });
   }, [allEmails, filters]);
