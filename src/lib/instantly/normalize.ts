@@ -299,8 +299,8 @@ export function normalizeEmail(
     week: toWeek(email.timestamp_email),
     subject: email.subject ?? '',
     content_preview: email.content_preview ?? bodyText.slice(0, 200),
-    body_text: bodyText,
-    body_html: bodyHtml,
+    body_text: bodyText.slice(0, 600),  // truncate — full body not needed for UI
+    body_html: '',                       // strip entirely — only presence flag used
     has_body_text: bodyText.trim().length > 0,
     has_body_html: bodyHtml.trim().length > 0,
     from_email: email.from_address_email,
