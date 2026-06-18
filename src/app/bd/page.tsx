@@ -135,9 +135,9 @@ function FilterDebugBar({
 }: FilterDebugProps) {
   const isFiltered = filteredCampaigns < totalCampaigns || filteredEmails < totalEmails;
   const activeFilters = [
-    filters.org && `Org: ${filters.org}`,
-    filters.campaign && `Campaign: ${filters.campaign}`,
-    filters.sector && `Sector: ${filters.sector}`,
+    filters.orgs.length > 0 && `Org: ${filters.orgs.length === 1 ? filters.orgs[0] : `${filters.orgs.length} orgs`}`,
+    filters.campaigns.length > 0 && `Campaign: ${filters.campaigns.length === 1 ? filters.campaigns[0] : `${filters.campaigns.length} campaigns`}`,
+    filters.sectors.length > 0 && `Sector: ${filters.sectors.length === 1 ? filters.sectors[0] : `${filters.sectors.length} sectors`}`,
     filters.state && `State: ${filters.state}`,
     filters.campaign_status && `Status: ${filters.campaign_status}`,
     filters.has_positive_replies && `Positives: ${filters.has_positive_replies}`,
@@ -1570,10 +1570,10 @@ export default function BDDashboard() {
   // In this state, sent-denominator rates (reply%, open%) would be misleading.
   const isFiltered =
     bd.filters.datePreset !== 'all' ||
-    !!bd.filters.org ||
-    !!bd.filters.sector ||
+    bd.filters.orgs.length > 0 ||
+    bd.filters.sectors.length > 0 ||
     !!bd.filters.state ||
-    !!bd.filters.campaign ||
+    bd.filters.campaigns.length > 0 ||
     !!bd.filters.campaign_status ||
     !!bd.filters.has_positive_replies ||
     !!bd.filters.recommended_action;
@@ -1598,7 +1598,6 @@ export default function BDDashboard() {
             <button onClick={() => bd.hardRefresh()} disabled={bd.loading} className="p-1.5 rounded-lg hover:bg-gray-100 disabled:opacity-50" title="Force re-pull from Instantly API">
               <RefreshCw className="h-3.5 w-3.5 text-gray-500" />
             </button>
-            <a href="/" className="hidden sm:inline hover:text-gray-600 transition-colors">← Pipeline</a>
           </div>
         </div>
         <div className="max-w-[1800px] mx-auto px-6 flex gap-0.5 overflow-x-auto border-t border-gray-100">

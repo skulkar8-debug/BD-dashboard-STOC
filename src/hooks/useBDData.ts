@@ -12,18 +12,14 @@ export type FilterState = {
   datePreset: DatePreset;
   from_date: string;
   to_date: string;
-  org: string;         // '' = all
-  sector: string;      // '' = all
-  state: string;       // '' = all
-  campaign: string;    // campaign_id, '' = all
+  orgs: string[];      // org ids, [] = all
+  sectors: string[];   // sector names, [] = all
+  state: string;       // '' = all (single)
+  campaigns: string[]; // campaign_ids, [] = all
   campaign_status: string;
   has_positive_replies: '' | 'yes' | 'no';
   recommended_action: string;
 };
-
-function todayStr() {
-  return format(new Date(), 'yyyy-MM-dd');
-}
 
 function presetDates(preset: DatePreset): { from_date: string; to_date: string } {
   const today = new Date();
@@ -55,10 +51,10 @@ function defaultFilters(): FilterState {
   return {
     datePreset: 'last_30',
     ...presetDates('last_30'),
-    org: '',
-    sector: '',
+    orgs: [],
+    sectors: [],
     state: '',
-    campaign: '',
+    campaigns: [],
     campaign_status: '',
     has_positive_replies: '',
     recommended_action: '',
@@ -104,19 +100,18 @@ export function useBDData() {
     [data]
   );
 
-  // campaignStats from filteredEmails — needed for has_positive_replies filtering
-  // We compute a preliminary version here using all emails with geo/campaign filters only.
+  // Pre-filtered emails used for has_positive_replies campaign filter
   const emailFilteredByCampaignDimensions = useMemo(() => {
     return allEmails.filter((e) => {
-      if (filters.org && e.org_id !== filters.org) return false;
-      if (filters.sector && e.sector !== filters.sector) return false;
+      if (filters.orgs.length > 0 && !filters.orgs.includes(e.org_id)) return false;
+      if (filters.sectors.length > 0 && !filters.sectors.includes(e.sector)) return false;
       if (filters.state && e.state !== filters.state) return false;
-      if (filters.campaign && e.campaign_id !== filters.campaign) return false;
+      if (filters.campaigns.length > 0 && !filters.campaigns.includes(e.campaign_id)) return false;
       if (filters.from_date && e.date_local < filters.from_date) return false;
       if (filters.to_date && e.date_local > filters.to_date) return false;
       return true;
     });
-  }, [allEmails, filters.org, filters.sector, filters.state, filters.campaign, filters.from_date, filters.to_date]);
+  }, [allEmails, filters.orgs, filters.sectors, filters.state, filters.campaigns, filters.from_date, filters.to_date]);
 
   const campaignPositiveMap = useMemo(() => {
     const m = new Map<string, boolean>();
@@ -128,10 +123,10 @@ export function useBDData() {
 
   const filteredCampaigns = useMemo(() => {
     return allCampaigns.filter((c) => {
-      if (filters.org && c.org_id !== filters.org) return false;
-      if (filters.sector && c.sector !== filters.sector) return false;
+      if (filters.orgs.length > 0 && !filters.orgs.includes(c.org_id)) return false;
+      if (filters.sectors.length > 0 && !filters.sectors.includes(c.sector)) return false;
       if (filters.state && c.state !== filters.state) return false;
-      if (filters.campaign && c.campaign_id !== filters.campaign) return false;
+      if (filters.campaigns.length > 0 && !filters.campaigns.includes(c.campaign_id)) return false;
       if (filters.campaign_status && c.campaign_status !== filters.campaign_status) return false;
       if (filters.recommended_action && c.recommended_action !== filters.recommended_action) return false;
       if (filters.has_positive_replies === 'yes' && !campaignPositiveMap.has(c.campaign_id)) return false;
@@ -142,19 +137,17 @@ export function useBDData() {
 
   const filteredEmails = useMemo(() => {
     return allEmails.filter((e) => {
-      if (filters.org && e.org_id !== filters.org) return false;
-      if (filters.sector && e.sector !== filters.sector) return false;
+      if (filters.orgs.length > 0 && !filters.orgs.includes(e.org_id)) return false;
+      if (filters.sectors.length > 0 && !filters.sectors.includes(e.sector)) return false;
       if (filters.state && e.state !== filters.state) return false;
-      if (filters.campaign && e.campaign_id !== filters.campaign) return false;
+      if (filters.campaigns.length > 0 && !filters.campaigns.includes(e.campaign_id)) return false;
       if (filters.from_date && e.date_local < filters.from_date) return false;
       if (filters.to_date && e.date_local > filters.to_date) return false;
       return true;
     });
   }, [allEmails, filters]);
 
-  // ── Per-campaign stats derived from filteredEmails ────────────────────────
-  // These replace c.positive_reply_count / c.actual_received_count everywhere
-  // in the UI so that date/campaign filters are correctly reflected.
+  // Per-campaign stats from filteredEmails — replaces pre-computed fields
   const campaignStats = useMemo(() => {
     const m = new Map<string, { received: number; positive: number; human: number }>();
     filteredEmails.forEach((e) => {
@@ -162,13 +155,11 @@ export function useBDData() {
       cur.received++;
       if (e.is_positive) cur.positive++;
       if (!e.is_auto_reply && e.final_classification !== 'unsubscribe') cur.human++;
-      if (!m.has(e.campaign_id)) m.set(e.campaign_id, cur);
-      else m.set(e.campaign_id, cur);
+      m.set(e.campaign_id, cur);
     });
     return m;
   }, [filteredEmails]);
 
-  // ── Human / actionable split (excludes automated + unsubscribe) ───────────
   const humanEmails = useMemo(
     () => filteredEmails.filter(
       (e) => !e.is_auto_reply && e.final_classification !== 'unsubscribe'
@@ -177,14 +168,13 @@ export function useBDData() {
   );
   const positiveEmails = useMemo(() => humanEmails.filter((e) => e.is_positive), [humanEmails]);
 
-  // Dimension options derived from ALL campaigns (not filtered) for the filter dropdowns
+  // Options for filter dropdowns — cascade: orgs -> sectors -> states -> campaigns
   const options = useMemo(() => {
-    // Cascading: sectors + states + campaigns filtered by selected org/sector/state
-    const orgCampaigns = filters.org
-      ? allCampaigns.filter((c) => c.org_id === filters.org)
+    const orgCampaigns = filters.orgs.length > 0
+      ? allCampaigns.filter((c) => filters.orgs.includes(c.org_id))
       : allCampaigns;
-    const sectorCampaigns = filters.sector
-      ? orgCampaigns.filter((c) => c.sector === filters.sector)
+    const sectorCampaigns = filters.sectors.length > 0
+      ? orgCampaigns.filter((c) => filters.sectors.includes(c.sector))
       : orgCampaigns;
     const stateCampaigns = filters.state
       ? sectorCampaigns.filter((c) => c.state === filters.state)
@@ -192,7 +182,7 @@ export function useBDData() {
     return {
       orgs: [...new Map(allCampaigns.map((c) => [c.org_id, c.org_label])).entries()]
         .map(([id, label]) => ({ id, label })),
-      sectors: [...new Set(orgCampaigns.map((c) => c.sector))].sort(),
+      sectors: [...new Set(orgCampaigns.map((c) => c.sector))].filter(Boolean).sort(),
       states: [...new Set(
         sectorCampaigns.map((c) => c.state).filter((s) => s && s !== 'Unmapped')
       )].sort(),
@@ -202,15 +192,18 @@ export function useBDData() {
       campaign_statuses: [...new Set(allCampaigns.map((c) => c.campaign_status))].sort(),
       recommended_actions: [...new Set(allCampaigns.map((c) => c.recommended_action))].sort(),
     };
-  }, [allCampaigns, filters.org, filters.sector, filters.state]);
+  }, [allCampaigns, filters.orgs, filters.sectors, filters.state]);
 
-  // When org/sector/state narrows the campaign list, clear campaign if it's no longer valid.
-  // This runs after options recompute so we always check against the up-to-date list.
+  // Remove selected campaigns that are no longer in the cascaded options list
   useEffect(() => {
-    if (filters.campaign && !options.campaigns.some((c) => c.id === filters.campaign)) {
-      setFilters((prev) => ({ ...prev, campaign: '' }));
-    }
-  }, [options.campaigns, filters.campaign]);
+    const validIds = new Set(options.campaigns.map((c) => c.id));
+    setFilters((prev) => {
+      if (prev.campaigns.length === 0) return prev;
+      const valid = prev.campaigns.filter((id) => validIds.has(id));
+      if (valid.length === prev.campaigns.length) return prev;
+      return { ...prev, campaigns: valid };
+    });
+  }, [options.campaigns]);
 
   const updateFilter = useCallback(<K extends keyof FilterState>(key: K, value: FilterState[K]) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
@@ -226,14 +219,9 @@ export function useBDData() {
   const stats = useMemo(() => {
     const sent = filteredCampaigns.reduce((s, c) => s + c.sent, 0);
     const analyticsAvailable = filteredCampaigns.some((c) => c.analytics_available);
-
-    // All received emails (includes automated, OOO, unsubscribe)
     const totalReceived = filteredEmails.length;
-    // Human replies only — excludes automated/OOO/bounce/unsubscribe
     const humanReplies = humanEmails.length;
-    // Actionable = positive classification among human replies
     const actionable = positiveEmails.length;
-
     const opps = filteredCampaigns.reduce((s, c) => s + c.opportunities, 0);
     const bounces = filteredCampaigns.reduce((s, c) => s + c.bounces, 0);
     const unsubs = filteredCampaigns.reduce((s, c) => s + c.unsubscribes, 0);
@@ -244,26 +232,18 @@ export function useBDData() {
       (c) => c.recommended_action === 'Pause / Review' || c.recommended_action === 'Review'
     ).length;
     const followUp = filteredCampaigns.filter((c) => c.recommended_action === 'Follow Up').length;
-
     const r = (n: number, d: number) => d > 0 ? Math.round((n / d) * 1000) / 10 : 0;
-
     return {
-      sent,
-      analyticsAvailable,
-      // Kept for backward compat display but clearly named
-      replies: totalReceived,           // all received (incl. automated)
-      humanReplies,                      // excludes OOO/bounce/auto/unsub
-      actionable,                        // positive classification, human only
-      actionable_rate: r(actionable, humanReplies),  // actionable / human
-      // legacy aliases (some tabs still use these, same values)
+      sent, analyticsAvailable,
+      replies: totalReceived,
+      humanReplies,
+      actionable,
+      actionable_rate: r(actionable, humanReplies),
       positive: actionable,
       positive_reply_rate: r(actionable, humanReplies),
-      opps,
-      opp_rate: r(opps, sent),
-      bounces,
-      bounce_rate: r(bounces, sent),
-      unsubs,
-      unsub_rate: r(unsubs, sent),
+      opps, opp_rate: r(opps, sent),
+      bounces, bounce_rate: r(bounces, sent),
+      unsubs, unsub_rate: r(unsubs, sent),
       activeCampaigns,
       totalCampaigns: filteredCampaigns.length,
       needsAttention,
@@ -276,7 +256,7 @@ export function useBDData() {
     filters, updateFilter, setDatePreset, resetFilters,
     allCampaigns, allEmails,
     filteredCampaigns, filteredEmails, humanEmails, positiveEmails,
-    campaignStats,   // Map<campaign_id, {received, positive, human}> — from filtered emails
+    campaignStats,
     options, stats,
   };
 }
