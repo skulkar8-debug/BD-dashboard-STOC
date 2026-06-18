@@ -66,6 +66,8 @@ export const CAMPAIGN_SECTOR_MAP: SectorMapping[] = [
   { campaign_name_pattern: 'Tow Co',                             sector: 'Towing Service' },
   { campaign_name_pattern: 'Auto Tow',                           sector: 'Towing Service' },
   { campaign_name_pattern: 'Road Service',                       sector: 'Towing Service' },
+  // Marina
+  { campaign_name_pattern: 'Marina',                             sector: 'Marina' },
 ];
 
 export const SECTOR_OPTIONS = [
@@ -85,6 +87,7 @@ export const SECTOR_OPTIONS = [
   'Manufacturing',
   'Multi-Site Consumer Services',
   'Financial / Professional Services',
+  'Marina',
   'Other / Unmapped',
 ];
 
