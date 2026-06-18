@@ -106,6 +106,7 @@ export async function GET(req: Request) {
         'INSTANTLY_MCLERRAN_API_KEY',
         'INSTANTLY_BRANTA_API_KEY',
         'INSTANTLY_CORVIA_API_KEY',
+        'INSTANTLY_LAUNDROMAT_API_KEY',
       ],
     }, { status: 400 });
   }

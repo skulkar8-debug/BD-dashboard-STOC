@@ -51,6 +51,13 @@ export const ORGS: OrgConfig[] = [
     apiKey: process.env.INSTANTLY_CORVIA_API_KEY?.trim(),
     enabled: !!process.env.INSTANTLY_CORVIA_API_KEY,
   },
+  {
+    id: 'laundromat',
+    label: 'Laundromat',
+    envKey: 'INSTANTLY_LAUNDROMAT_API_KEY',
+    apiKey: process.env.INSTANTLY_LAUNDROMAT_API_KEY?.trim(),
+    enabled: !!process.env.INSTANTLY_LAUNDROMAT_API_KEY,
+  },
 ];
 
 export function getEnabledOrgs(): OrgConfig[] {
