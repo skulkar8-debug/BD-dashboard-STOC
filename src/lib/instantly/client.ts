@@ -9,25 +9,39 @@ const BASE = 'https://api.instantly.ai/api/v2';
 async function get<T>(
   apiKey: string,
   path: string,
-  params: Record<string, string | string[]> = {}
+  params: Record<string, string | string[]> = {},
+  retries = 4
 ): Promise<T> {
   const url = new URL(`${BASE}${path}`);
   Object.entries(params).forEach(([k, v]) => {
     if (Array.isArray(v)) v.forEach((vi) => url.searchParams.append(k, vi));
     else url.searchParams.set(k, v);
   });
-  const res = await fetch(url.toString(), {
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    cache: 'no-store',
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Instantly ${path} → ${res.status}: ${text.slice(0, 300)}`);
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const res = await fetch(url.toString(), {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+    });
+    if (res.status === 429) {
+      if (attempt === retries) {
+        const text = await res.text();
+        throw new Error(`Instantly ${path} → 429: ${text.slice(0, 300)}`);
+      }
+      // Back off: 6s, 12s, 24s, 48s — lets the 60-second rate-limit window clear
+      const wait = 6000 * Math.pow(2, attempt);
+      await sleep(wait);
+      continue;
+    }
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Instantly ${path} → ${res.status}: ${text.slice(0, 300)}`);
+    }
+    return res.json() as Promise<T>;
   }
-  return res.json() as Promise<T>;
+  throw new Error(`Instantly ${path} → exhausted retries`);
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
