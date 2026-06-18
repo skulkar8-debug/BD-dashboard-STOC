@@ -116,8 +116,8 @@ function MultiSel({
       </button>
 
       {open && (
-        <div className={`absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-50 py-1 ${maxWidth} min-w-[160px]`}
-          style={{ maxHeight: '280px', overflowY: 'auto' }}
+        <div className={`absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg py-1 ${maxWidth} min-w-[160px]`}
+          style={{ maxHeight: '280px', overflowY: 'auto', zIndex: 9999 }}
         >
           {items.length === 0 ? (
             <div className="px-3 py-2 text-xs text-gray-400 italic">No options</div>

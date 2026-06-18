@@ -1455,9 +1455,10 @@ function AnalyticsTab({
 
 // ─── Compare ─────────────────────────────────────────────────────────────────
 
-// Only 2 colors used throughout the entire tab: blue (A) and green (B/winner)
-const CA = '#3b82f6'; // blue  — sector A
-const CB = '#22c55e'; // green — sector B (also used for winner highlights)
+// Both sectors start grey; winner turns green, loser turns blue
+const C_GREY  = '#9ca3af';
+const C_GREEN = '#22c55e';
+const C_BLUE  = '#3b82f6';
 
 type SectorProfile = {
   label: string;
@@ -1506,11 +1507,11 @@ function buildProfile(sector: string, camps: NormalizedCampaign[], emails: Norma
   return { label: sector, campaigns, emails: sEmails, positive, human, sent, byState, byMonth, byClass };
 }
 
-function CmpKpi({ label, a, b, higherBetter = true, fmt: f }: {
-  label: string; a: number; b: number; higherBetter?: boolean; fmt?: (n: number) => string;
+function CmpKpi({ label, a, b, colorA, colorB, higherBetter = true, fmt: f }: {
+  label: string; a: number; b: number; colorA: string; colorB: string; higherBetter?: boolean; fmt?: (n: number) => string;
 }) {
   const fmtN = f ?? ((n: number) => n.toLocaleString());
-  const winner: 'A' | 'B' | null = a === b ? null : higherBetter ? (a > b ? 'A' : 'B') : (a < b ? 'A' : 'B');
+  const kpiWinner: 'A' | 'B' | null = a === b ? null : higherBetter ? (a > b ? 'A' : 'B') : (a < b ? 'A' : 'B');
   const max = Math.max(a, b, 1);
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
@@ -1518,24 +1519,24 @@ function CmpKpi({ label, a, b, higherBetter = true, fmt: f }: {
       <div className="space-y-2">
         <div>
           <div className="flex items-center justify-between mb-1">
-            <span className="text-xs font-medium" style={{ color: CA }}>A</span>
-            <span className="text-base font-bold tabular-nums" style={{ color: CA }}>
-              {fmtN(a)}{winner === 'A' && <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded text-white font-bold" style={{ backgroundColor: CA }}>W</span>}
+            <span className="text-xs font-medium" style={{ color: colorA }}>A</span>
+            <span className="text-base font-bold tabular-nums" style={{ color: colorA }}>
+              {fmtN(a)}{kpiWinner === 'A' && <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded text-white font-bold" style={{ backgroundColor: colorA }}>W</span>}
             </span>
           </div>
           <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
-            <div className="h-full rounded-full" style={{ width: `${(a / max) * 100}%`, backgroundColor: CA }} />
+            <div className="h-full rounded-full" style={{ width: `${(a / max) * 100}%`, backgroundColor: colorA }} />
           </div>
         </div>
         <div>
           <div className="flex items-center justify-between mb-1">
-            <span className="text-xs font-medium" style={{ color: CB }}>B</span>
-            <span className="text-base font-bold tabular-nums" style={{ color: CB }}>
-              {fmtN(b)}{winner === 'B' && <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded text-white font-bold" style={{ backgroundColor: CB }}>W</span>}
+            <span className="text-xs font-medium" style={{ color: colorB }}>B</span>
+            <span className="text-base font-bold tabular-nums" style={{ color: colorB }}>
+              {fmtN(b)}{kpiWinner === 'B' && <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded text-white font-bold" style={{ backgroundColor: colorB }}>W</span>}
             </span>
           </div>
           <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
-            <div className="h-full rounded-full" style={{ width: `${(b / max) * 100}%`, backgroundColor: CB }} />
+            <div className="h-full rounded-full" style={{ width: `${(b / max) * 100}%`, backgroundColor: colorB }} />
           </div>
         </div>
       </div>
@@ -1606,20 +1607,18 @@ function CompareTab({ filteredCampaigns, filteredEmails }: { filteredCampaigns: 
       <div className="flex flex-wrap items-center gap-4">
         <span className="text-sm font-semibold text-gray-600">Compare sectors (using active filters):</span>
         <div className="flex items-center gap-2">
-          <span className="text-xs font-bold px-2 py-0.5 rounded text-white" style={{ backgroundColor: CA }}>A</span>
+          <span className="text-xs font-bold px-2 py-0.5 rounded text-white bg-gray-400">A</span>
           <select value={sectorA} onChange={(e) => setSectorA(e.target.value)}
-            className="text-sm rounded-lg border px-3 py-1.5 font-medium focus:outline-none focus:ring-2 focus:ring-blue-400"
-            style={{ borderColor: CA, color: CA, backgroundColor: '#eff6ff' }}>
+            className="text-sm rounded-lg border border-gray-300 px-3 py-1.5 font-medium text-gray-700 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-300">
             <option value="">Select sector</option>
             {sectorList.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
         <span className="text-gray-300 text-xl font-light">vs</span>
         <div className="flex items-center gap-2">
-          <span className="text-xs font-bold px-2 py-0.5 rounded text-white" style={{ backgroundColor: CB }}>B</span>
+          <span className="text-xs font-bold px-2 py-0.5 rounded text-white bg-gray-400">B</span>
           <select value={sectorB} onChange={(e) => setSectorB(e.target.value)}
-            className="text-sm rounded-lg border px-3 py-1.5 font-medium focus:outline-none focus:ring-2 focus:ring-orange-400"
-            style={{ borderColor: CB, color: CB, backgroundColor: '#fff7ed' }}>
+            className="text-sm rounded-lg border border-gray-300 px-3 py-1.5 font-medium text-gray-700 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-300">
             <option value="">Select sector</option>
             {sectorList.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
@@ -1631,6 +1630,11 @@ function CompareTab({ filteredCampaigns, filteredEmails }: { filteredCampaigns: 
   if (!profA || !profB) return <div className="space-y-4">{sectorSelector}<div className="text-center py-16 text-gray-400 text-sm">Select two sectors to compare</div></div>;
 
   const winner: 'A' | 'B' | null = scores.A > scores.B ? 'A' : scores.B > scores.A ? 'B' : null;
+  // Dynamic colors: winner = green, loser = blue, tied = grey
+  const colorA = winner === 'A' ? C_GREEN : winner === 'B' ? C_BLUE : C_GREY;
+  const colorB = winner === 'B' ? C_GREEN : winner === 'A' ? C_BLUE : C_GREY;
+  const mapColorA: 'green' | 'blue' = winner === 'A' ? 'green' : 'blue';
+  const mapColorB: 'green' | 'blue' = winner === 'B' ? 'green' : 'blue';
 
   return (
     <div className="space-y-5">
@@ -1639,22 +1643,22 @@ function CompareTab({ filteredCampaigns, filteredEmails }: { filteredCampaigns: 
       {/* Scoreboard */}
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
         <div className="grid grid-cols-3 divide-x divide-gray-100">
-          <div className="p-5 text-center" style={{ backgroundColor: `${CA}0d` }}>
-            <div className="text-3xl font-black" style={{ color: CA }}>{scores.A}</div>
+          <div className="p-5 text-center" style={{ backgroundColor: `${colorA}12` }}>
+            <div className="text-3xl font-black" style={{ color: colorA }}>{scores.A}</div>
             <div className="text-sm font-semibold text-gray-700 mt-1">{profA.label}</div>
             <div className="text-[11px] text-gray-400 mt-0.5">{profA.campaigns.length} campaigns · {profA.emails.length} replies</div>
-            {winner === 'A' && <div className="mt-2 inline-block text-xs font-bold px-3 py-0.5 rounded-full text-white" style={{ backgroundColor: CA }}>Winner</div>}
+            {winner === 'A' && <div className="mt-2 inline-block text-xs font-bold px-3 py-0.5 rounded-full text-white" style={{ backgroundColor: colorA }}>Winner</div>}
           </div>
           <div className="p-5 text-center bg-gray-50 flex flex-col items-center justify-center">
             <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest mb-1">Score</div>
             <div className="text-4xl font-black text-gray-300">{scores.A} : {scores.B}</div>
             {winner === null && <div className="mt-2 text-xs text-gray-400 font-medium">Tied</div>}
           </div>
-          <div className="p-5 text-center" style={{ backgroundColor: `${CB}0d` }}>
-            <div className="text-3xl font-black" style={{ color: CB }}>{scores.B}</div>
+          <div className="p-5 text-center" style={{ backgroundColor: `${colorB}12` }}>
+            <div className="text-3xl font-black" style={{ color: colorB }}>{scores.B}</div>
             <div className="text-sm font-semibold text-gray-700 mt-1">{profB.label}</div>
             <div className="text-[11px] text-gray-400 mt-0.5">{profB.campaigns.length} campaigns · {profB.emails.length} replies</div>
-            {winner === 'B' && <div className="mt-2 inline-block text-xs font-bold px-3 py-0.5 rounded-full text-white" style={{ backgroundColor: CB }}>Winner</div>}
+            {winner === 'B' && <div className="mt-2 inline-block text-xs font-bold px-3 py-0.5 rounded-full text-white" style={{ backgroundColor: colorB }}>Winner</div>}
           </div>
         </div>
       </div>
@@ -1666,29 +1670,29 @@ function CompareTab({ filteredCampaigns, filteredEmails }: { filteredCampaigns: 
 
       {/* KPI grid */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <CmpKpi label="Positive Replies" a={profA.positive.length} b={profB.positive.length} />
-        <CmpKpi label="Actionable Rate" a={posRateA} b={posRateB} fmt={(n) => n.toFixed(1) + '%'} />
-        <CmpKpi label="Total Replies" a={profA.emails.length} b={profB.emails.length} />
-        <CmpKpi label="Opportunities" a={profA.campaigns.reduce((s, c) => s + c.opportunities, 0)} b={profB.campaigns.reduce((s, c) => s + c.opportunities, 0)} />
+        <CmpKpi label="Positive Replies" a={profA.positive.length} b={profB.positive.length} colorA={colorA} colorB={colorB} />
+        <CmpKpi label="Actionable Rate" a={posRateA} b={posRateB} colorA={colorA} colorB={colorB} fmt={(n) => n.toFixed(1) + '%'} />
+        <CmpKpi label="Total Replies" a={profA.emails.length} b={profB.emails.length} colorA={colorA} colorB={colorB} />
+        <CmpKpi label="Opportunities" a={profA.campaigns.reduce((s, c) => s + c.opportunities, 0)} b={profB.campaigns.reduce((s, c) => s + c.opportunities, 0)} colorA={colorA} colorB={colorB} />
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <CmpKpi label="Sent (all-time)" a={profA.sent} b={profB.sent} />
-        <CmpKpi label="Human Replies" a={profA.human.length} b={profB.human.length} />
-        <CmpKpi label="Campaigns" a={profA.campaigns.length} b={profB.campaigns.length} />
-        <CmpKpi label="Bounces (all-time)" a={profA.campaigns.reduce((s, c) => s + c.bounces, 0)} b={profB.campaigns.reduce((s, c) => s + c.bounces, 0)} higherBetter={false} />
+        <CmpKpi label="Sent (all-time)" a={profA.sent} b={profB.sent} colorA={colorA} colorB={colorB} />
+        <CmpKpi label="Human Replies" a={profA.human.length} b={profB.human.length} colorA={colorA} colorB={colorB} />
+        <CmpKpi label="Campaigns" a={profA.campaigns.length} b={profB.campaigns.length} colorA={colorA} colorB={colorB} />
+        <CmpKpi label="Bounces (all-time)" a={profA.campaigns.reduce((s, c) => s + c.bounces, 0)} b={profB.campaigns.reduce((s, c) => s + c.bounces, 0)} colorA={colorA} colorB={colorB} higherBetter={false} />
       </div>
 
-      {/* Dual heatmaps side by side — MOVED TO TOP */}
+      {/* Dual heatmaps side by side */}
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 text-sm font-semibold text-gray-700">State Heatmap — Positive Replies</div>
         <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-gray-100">
           <div>
-            <div className="px-4 py-2 text-xs font-bold border-b border-gray-100" style={{ color: CA, backgroundColor: `${CA}0d` }}>A — {profA.label}</div>
-            <CompareHeatMap byState={profA.byState} color="blue" label={profA.label} />
+            <div className="px-4 py-2 text-xs font-bold border-b border-gray-100" style={{ color: colorA, backgroundColor: `${colorA}12` }}>A — {profA.label}</div>
+            <CompareHeatMap byState={profA.byState} color={mapColorA} label={profA.label} />
           </div>
           <div>
-            <div className="px-4 py-2 text-xs font-bold border-b border-gray-100" style={{ color: CB, backgroundColor: `${CB}0d` }}>B — {profB.label}</div>
-            <CompareHeatMap byState={profB.byState} color="green" label={profB.label} />
+            <div className="px-4 py-2 text-xs font-bold border-b border-gray-100" style={{ color: colorB, backgroundColor: `${colorB}12` }}>B — {profB.label}</div>
+            <CompareHeatMap byState={profB.byState} color={mapColorB} label={profB.label} />
           </div>
         </div>
       </div>
@@ -1698,15 +1702,14 @@ function CompareTab({ filteredCampaigns, filteredEmails }: { filteredCampaigns: 
         <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between flex-wrap gap-2">
           <span className="text-sm font-semibold text-gray-700">Monthly Reply Volume</span>
           <div className="flex items-center gap-4 text-xs text-gray-500">
-            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm inline-block" style={{ backgroundColor: CA }} />{profA.label}</span>
-            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm inline-block" style={{ backgroundColor: CB }} />{profB.label}</span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm inline-block" style={{ backgroundColor: colorA }} />{profA.label}</span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm inline-block" style={{ backgroundColor: colorB }} />{profB.label}</span>
           </div>
         </div>
         {allMonths.length === 0 ? (
           <div className="py-12 text-center text-sm text-gray-400">No monthly data</div>
         ) : (
           <div className="p-4 overflow-x-auto">
-            {/* SVG grouped bar chart */}
             {(() => {
               const BAR_W = 14; const GAP = 4; const GROUP_GAP = 16;
               const GROUP_W = BAR_W * 2 + GAP;
@@ -1714,7 +1717,6 @@ function CompareTab({ filteredCampaigns, filteredEmails }: { filteredCampaigns: 
               const totalW = allMonths.length * (GROUP_W + GROUP_GAP) + GROUP_GAP;
               return (
                 <svg width={totalW} height={CHART_H + LABEL_H} style={{ minWidth: '100%', overflow: 'visible' }}>
-                  {/* Y gridlines */}
                   {[0, 0.25, 0.5, 0.75, 1].map((frac) => (
                     <line key={frac} x1={0} x2={totalW} y1={CHART_H * (1 - frac)} y2={CHART_H * (1 - frac)} stroke="#f3f4f6" strokeWidth={1} />
                   ))}
@@ -1726,19 +1728,14 @@ function CompareTab({ filteredCampaigns, filteredEmails }: { filteredCampaigns: 
                     const x = GROUP_GAP + i * (GROUP_W + GROUP_GAP);
                     return (
                       <g key={m}>
-                        {/* Bar A */}
-                        <rect x={x} y={CHART_H - hA} width={BAR_W} height={hA} fill={CA} rx={2} opacity={0.85} />
-                        {/* Bar B */}
-                        <rect x={x + BAR_W + GAP} y={CHART_H - hB} width={BAR_W} height={hB} fill={CB} rx={2} opacity={0.85} />
-                        {/* Values above bars */}
-                        {va > 0 && <text x={x + BAR_W / 2} y={CHART_H - hA - 3} textAnchor="middle" fontSize={8} fill={CA} fontWeight={600}>{va}</text>}
-                        {vb > 0 && <text x={x + BAR_W + GAP + BAR_W / 2} y={CHART_H - hB - 3} textAnchor="middle" fontSize={8} fill={CB} fontWeight={600}>{vb}</text>}
-                        {/* Month label */}
+                        <rect x={x} y={CHART_H - hA} width={BAR_W} height={hA} fill={colorA} rx={2} opacity={0.85} />
+                        <rect x={x + BAR_W + GAP} y={CHART_H - hB} width={BAR_W} height={hB} fill={colorB} rx={2} opacity={0.85} />
+                        {va > 0 && <text x={x + BAR_W / 2} y={CHART_H - hA - 3} textAnchor="middle" fontSize={8} fill={colorA} fontWeight={600}>{va}</text>}
+                        {vb > 0 && <text x={x + BAR_W + GAP + BAR_W / 2} y={CHART_H - hB - 3} textAnchor="middle" fontSize={8} fill={colorB} fontWeight={600}>{vb}</text>}
                         <text x={x + GROUP_W / 2} y={CHART_H + 14} textAnchor="middle" fontSize={9} fill="#9ca3af">{monthToLabel(m)}</text>
                       </g>
                     );
                   })}
-                  {/* Baseline */}
                   <line x1={0} x2={totalW} y1={CHART_H} y2={CHART_H} stroke="#e5e7eb" strokeWidth={1} />
                 </svg>
               );
@@ -1762,17 +1759,17 @@ function CompareTab({ filteredCampaigns, filteredEmails }: { filteredCampaigns: 
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-xs text-gray-600">{label}</span>
                     <div className="flex items-center gap-2 text-[11px] tabular-nums">
-                      <span className="font-semibold" style={{ color: CA }}>{va}</span>
+                      <span className="font-semibold" style={{ color: colorA }}>{va}</span>
                       <span className="text-gray-300">·</span>
-                      <span className="font-semibold" style={{ color: CB }}>{vb}</span>
+                      <span className="font-semibold" style={{ color: colorB }}>{vb}</span>
                     </div>
                   </div>
                   <div className="space-y-0.5">
                     <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
-                      <div className="h-full rounded-full" style={{ width: `${(va / maxV) * 100}%`, backgroundColor: CA }} />
+                      <div className="h-full rounded-full" style={{ width: `${(va / maxV) * 100}%`, backgroundColor: colorA }} />
                     </div>
                     <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
-                      <div className="h-full rounded-full" style={{ width: `${(vb / maxV) * 100}%`, backgroundColor: CB }} />
+                      <div className="h-full rounded-full" style={{ width: `${(vb / maxV) * 100}%`, backgroundColor: colorB }} />
                     </div>
                   </div>
                 </div>
@@ -1784,7 +1781,7 @@ function CompareTab({ filteredCampaigns, filteredEmails }: { filteredCampaigns: 
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 text-sm font-semibold text-gray-700">Top Campaigns by Positive Replies</div>
           <div className="grid grid-cols-2 divide-x divide-gray-100 h-full">
-            {([['A', profA, topCampsA, CA], ['B', profB, topCampsB, CB]] as const).map(([side, prof, camps, color]) => (
+            {([['A', profA, topCampsA, colorA], ['B', profB, topCampsB, colorB]] as const).map(([side, prof, camps, color]) => (
               <div key={side}>
                 <div className="px-3 py-2 text-xs font-bold border-b border-gray-100" style={{ color, backgroundColor: `${color}12` }}>{prof.label}</div>
                 {camps.length === 0 && <div className="px-3 py-6 text-xs text-gray-400 text-center">No data</div>}
@@ -1814,12 +1811,12 @@ function CompareTab({ filteredCampaigns, filteredEmails }: { filteredCampaigns: 
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100 text-[10px] text-gray-400 uppercase tracking-wide">
                 <th className="text-left px-4 py-2">State</th>
-                <th className="text-right px-3 py-2" style={{ color: CA }}>A Replies</th>
-                <th className="text-right px-3 py-2" style={{ color: CA }}>A Pos</th>
-                <th className="text-right px-3 py-2" style={{ color: CA }}>A Pos%</th>
-                <th className="text-right px-3 py-2" style={{ color: CB }}>B Replies</th>
-                <th className="text-right px-3 py-2" style={{ color: CB }}>B Pos</th>
-                <th className="text-right px-3 py-2" style={{ color: CB }}>B Pos%</th>
+                <th className="text-right px-3 py-2" style={{ color: colorA }}>A Replies</th>
+                <th className="text-right px-3 py-2" style={{ color: colorA }}>A Pos</th>
+                <th className="text-right px-3 py-2" style={{ color: colorA }}>A Pos%</th>
+                <th className="text-right px-3 py-2" style={{ color: colorB }}>B Replies</th>
+                <th className="text-right px-3 py-2" style={{ color: colorB }}>B Pos</th>
+                <th className="text-right px-3 py-2" style={{ color: colorB }}>B Pos%</th>
                 <th className="text-right px-3 py-2">Winner</th>
               </tr>
             </thead>
@@ -1835,13 +1832,13 @@ function CompareTab({ filteredCampaigns, filteredEmails }: { filteredCampaigns: 
                   <tr key={state} className="border-b border-gray-50 hover:bg-gray-50">
                     <td className="px-4 py-1.5 font-medium text-gray-700">{state}</td>
                     <td className="text-right px-3 py-1.5 text-gray-500">{sa?.replies ?? '—'}</td>
-                    <td className="text-right px-3 py-1.5 font-semibold" style={{ color: CA }}>{pa || '—'}</td>
+                    <td className="text-right px-3 py-1.5 font-semibold" style={{ color: colorA }}>{pa || '—'}</td>
                     <td className="text-right px-3 py-1.5 text-gray-400">{rA}</td>
                     <td className="text-right px-3 py-1.5 text-gray-500">{sb?.replies ?? '—'}</td>
-                    <td className="text-right px-3 py-1.5 font-semibold" style={{ color: CB }}>{pb || '—'}</td>
+                    <td className="text-right px-3 py-1.5 font-semibold" style={{ color: colorB }}>{pb || '—'}</td>
                     <td className="text-right px-3 py-1.5 text-gray-400">{rB}</td>
                     <td className="text-right px-3 py-1.5">
-                      {w && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded text-white" style={{ backgroundColor: w === 'A' ? CA : CB }}>{w}</span>}
+                      {w && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded text-white" style={{ backgroundColor: w === 'A' ? colorA : colorB }}>{w}</span>}
                     </td>
                   </tr>
                 );
