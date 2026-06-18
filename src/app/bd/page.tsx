@@ -238,16 +238,16 @@ function OverviewTab({
   const toReview = campaigns.filter((c) => c.recommended_action === 'Pause / Review' || c.recommended_action === 'Review')
     .sort((a, b) => b.sent - a.sent).slice(0, 5);
 
-  // Sector performance table
+  // Sector performance table — show all sectors (no cap)
   const sectorRows = [...bySector.entries()]
+    .filter(([sector]) => sector && sector !== 'Unmapped')
     .map(([sector, v]) => ({ sector, ...v }))
-    .sort((a, b) => b.positive - a.positive)
-    .slice(0, 8);
+    .sort((a, b) => b.positive - a.positive);
 
   const stateRows = [...byState.entries()]
     .map(([state, v]) => ({ state, ...v }))
     .sort((a, b) => b.positive - a.positive)
-    .slice(0, 8);
+    .slice(0, 12);
 
   // Recent positive replies
   const recentPositive = [...positive]
