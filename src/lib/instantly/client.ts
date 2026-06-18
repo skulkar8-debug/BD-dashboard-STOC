@@ -89,7 +89,7 @@ export async function fetchAllCampaignAnalytics(
 export async function fetchReceivedEmails(
   apiKey: string,
   campaignId?: string,
-  limit = 2000
+  limit = 5000
 ): Promise<InstantlyEmail[]> {
   const params: Record<string, string> = {
     email_type: 'received',

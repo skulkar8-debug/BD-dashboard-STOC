@@ -1602,6 +1602,73 @@ function CmpKpi({ label, a, b, colorA, colorB, higherBetter = true, fmt: f }: {
   );
 }
 
+function MonthlyBarChart({
+  allMonths, profA, profB, colorA, colorB, maxMonthTotal,
+}: {
+  allMonths: string[];
+  profA: SectorProfile;
+  profB: SectorProfile;
+  colorA: string;
+  colorB: string;
+  maxMonthTotal: number;
+}) {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const [width, setWidth] = React.useState(0);
+
+  React.useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      setWidth(entries[0].contentRect.width);
+    });
+    ro.observe(el);
+    setWidth(el.getBoundingClientRect().width);
+    return () => ro.disconnect();
+  }, []);
+
+  const CHART_H = 160;
+  const LABEL_H = 28;
+  const PAD_L = 8;
+  const PAD_R = 8;
+  const n = allMonths.length;
+  const usable = Math.max(width - PAD_L - PAD_R, 1);
+  const GROUP_W = n > 0 ? usable / n : 40;
+  const GAP = Math.max(GROUP_W * 0.12, 2);
+  const BAR_W = (GROUP_W - GAP) / 2;
+  const svgH = CHART_H + LABEL_H;
+
+  return (
+    <div ref={containerRef} style={{ width: '100%' }}>
+      {width > 0 && (
+        <svg width={width} height={svgH} style={{ display: 'block', overflow: 'visible' }}>
+          {[0, 0.25, 0.5, 0.75, 1].map((frac) => (
+            <line key={frac} x1={PAD_L} x2={width - PAD_R} y1={CHART_H * (1 - frac)} y2={CHART_H * (1 - frac)} stroke="#f3f4f6" strokeWidth={1} />
+          ))}
+          {allMonths.map((m, i) => {
+            const va = profA.byMonth.get(m)?.total ?? 0;
+            const vb = profB.byMonth.get(m)?.total ?? 0;
+            const hA = maxMonthTotal > 0 ? Math.round((va / maxMonthTotal) * CHART_H) : 0;
+            const hB = maxMonthTotal > 0 ? Math.round((vb / maxMonthTotal) * CHART_H) : 0;
+            const gx = PAD_L + i * GROUP_W;
+            const fontSize = Math.max(8, Math.min(11, GROUP_W / 5));
+            const labelSize = Math.max(8, Math.min(11, GROUP_W / 4.5));
+            return (
+              <g key={m}>
+                <rect x={gx} y={CHART_H - hA} width={BAR_W} height={hA} fill={colorA} rx={2} opacity={0.85} />
+                <rect x={gx + BAR_W + GAP} y={CHART_H - hB} width={BAR_W} height={hB} fill={colorB} rx={2} opacity={0.85} />
+                {va > 0 && <text x={gx + BAR_W / 2} y={CHART_H - hA - 3} textAnchor="middle" fontSize={fontSize} fill={colorA} fontWeight={600}>{va}</text>}
+                {vb > 0 && <text x={gx + BAR_W + GAP + BAR_W / 2} y={CHART_H - hB - 3} textAnchor="middle" fontSize={fontSize} fill={colorB} fontWeight={600}>{vb}</text>}
+                <text x={gx + GROUP_W / 2} y={CHART_H + 17} textAnchor="middle" fontSize={labelSize} fill="#9ca3af">{monthToLabel(m as string)}</text>
+              </g>
+            );
+          })}
+          <line x1={PAD_L} x2={width - PAD_R} y1={CHART_H} y2={CHART_H} stroke="#e5e7eb" strokeWidth={1} />
+        </svg>
+      )}
+    </div>
+  );
+}
+
 function CompareTab({ filteredCampaigns, filteredEmails, sectorA, setSectorA, sectorB, setSectorB }: {
   filteredCampaigns: NormalizedCampaign[];
   filteredEmails: NormalizedEmail[];
@@ -1770,44 +1837,14 @@ function CompareTab({ filteredCampaigns, filteredEmails, sectorA, setSectorA, se
           <div className="py-12 text-center text-sm text-gray-400">No monthly data</div>
         ) : (
           <div className="p-4">
-            {(() => {
-              // Use a fixed viewBox that fills available width via preserveAspectRatio
-              const n = allMonths.length;
-              const CHART_H = 160; const LABEL_H = 28; const PAD_L = 8; const PAD_R = 8;
-              // Each group occupies equal share of the viewBox width
-              const GROUP_W = 32; // bar group width in viewBox units
-              const GAP = 4;      // gap between A and B bars within group
-              const BAR_W = (GROUP_W - GAP) / 2;
-              const totalVW = PAD_L + n * GROUP_W + PAD_R;
-              return (
-                <svg
-                  viewBox={`0 0 ${totalVW} ${CHART_H + LABEL_H}`}
-                  style={{ width: '100%', display: 'block' }}
-                  preserveAspectRatio="none"
-                >
-                  {[0, 0.25, 0.5, 0.75, 1].map((frac) => (
-                    <line key={frac} x1={0} x2={totalVW} y1={CHART_H * (1 - frac)} y2={CHART_H * (1 - frac)} stroke="#f3f4f6" strokeWidth={0.5} />
-                  ))}
-                  {allMonths.map((m, i) => {
-                    const va = profA.byMonth.get(m)?.total ?? 0;
-                    const vb = profB.byMonth.get(m)?.total ?? 0;
-                    const hA = Math.round((va / maxMonthTotal) * CHART_H);
-                    const hB = Math.round((vb / maxMonthTotal) * CHART_H);
-                    const gx = PAD_L + i * GROUP_W;
-                    return (
-                      <g key={m}>
-                        <rect x={gx} y={CHART_H - hA} width={BAR_W} height={hA} fill={colorA} rx={1.5} opacity={0.85} />
-                        <rect x={gx + BAR_W + GAP} y={CHART_H - hB} width={BAR_W} height={hB} fill={colorB} rx={1.5} opacity={0.85} />
-                        {va > 0 && <text x={gx + BAR_W / 2} y={CHART_H - hA - 2} textAnchor="middle" fontSize={6} fill={colorA} fontWeight={600}>{va}</text>}
-                        {vb > 0 && <text x={gx + BAR_W + GAP + BAR_W / 2} y={CHART_H - hB - 2} textAnchor="middle" fontSize={6} fill={colorB} fontWeight={600}>{vb}</text>}
-                        <text x={gx + GROUP_W / 2} y={CHART_H + 16} textAnchor="middle" fontSize={7} fill="#9ca3af">{monthToLabel(m)}</text>
-                      </g>
-                    );
-                  })}
-                  <line x1={0} x2={totalVW} y1={CHART_H} y2={CHART_H} stroke="#e5e7eb" strokeWidth={0.5} />
-                </svg>
-              );
-            })()}
+            <MonthlyBarChart
+              allMonths={allMonths}
+              profA={profA}
+              profB={profB}
+              colorA={colorA}
+              colorB={colorB}
+              maxMonthTotal={maxMonthTotal}
+            />
           </div>
         )}
       </div>
