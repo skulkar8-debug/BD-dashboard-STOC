@@ -147,6 +147,34 @@ export function useBDData() {
     });
   }, [allEmails, filters]);
 
+  // Compare tab: same filters as filtered* but WITHOUT the sectors dimension,
+  // because CompareTab applies its own per-sector segmentation.
+  const compareCampaigns = useMemo(() => {
+    return allCampaigns.filter((c) => {
+      if (filters.orgs.length > 0 && !filters.orgs.includes(c.org_id)) return false;
+      // ← no sector filter here
+      if (filters.state && c.state !== filters.state) return false;
+      if (filters.campaigns.length > 0 && !filters.campaigns.includes(c.campaign_id)) return false;
+      if (filters.campaign_status && c.campaign_status !== filters.campaign_status) return false;
+      if (filters.recommended_action && c.recommended_action !== filters.recommended_action) return false;
+      if (filters.has_positive_replies === 'yes' && !campaignPositiveMap.has(c.campaign_id)) return false;
+      if (filters.has_positive_replies === 'no' && campaignPositiveMap.has(c.campaign_id)) return false;
+      return true;
+    });
+  }, [allCampaigns, filters.orgs, filters.state, filters.campaigns, filters.campaign_status, filters.recommended_action, filters.has_positive_replies, campaignPositiveMap]);
+
+  const compareEmails = useMemo(() => {
+    return allEmails.filter((e) => {
+      if (filters.orgs.length > 0 && !filters.orgs.includes(e.org_id)) return false;
+      // ← no sector filter here
+      if (filters.state && e.state !== filters.state) return false;
+      if (filters.campaigns.length > 0 && !filters.campaigns.includes(e.campaign_id)) return false;
+      if (filters.from_date && e.date_local < filters.from_date) return false;
+      if (filters.to_date && e.date_local > filters.to_date) return false;
+      return true;
+    });
+  }, [allEmails, filters.orgs, filters.state, filters.campaigns, filters.from_date, filters.to_date]);
+
   // Per-campaign stats from filteredEmails — replaces pre-computed fields
   const campaignStats = useMemo(() => {
     const m = new Map<string, { received: number; positive: number; human: number }>();
@@ -256,6 +284,7 @@ export function useBDData() {
     filters, setFilters, updateFilter, setDatePreset, resetFilters,
     allCampaigns, allEmails,
     filteredCampaigns, filteredEmails, humanEmails, positiveEmails,
+    compareCampaigns, compareEmails,
     campaignStats,
     options, stats,
   };

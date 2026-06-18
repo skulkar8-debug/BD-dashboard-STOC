@@ -1665,7 +1665,7 @@ function CompareTab({ filteredCampaigns, filteredEmails, sectorA, setSectorA, se
   const sectorSelector = (
     <div className="bg-white border border-gray-200 rounded-xl px-5 py-4 shadow-sm">
       <div className="flex flex-wrap items-center gap-4">
-        <span className="text-sm font-semibold text-gray-600">Compare sectors (using active filters):</span>
+        <span className="text-sm font-semibold text-gray-600">Compare sectors <span className="text-gray-400 font-normal text-xs">(date · org · state filters apply — sector filter ignored)</span></span>
         <div className="flex items-center gap-2">
           <span className="text-xs font-bold px-2 py-0.5 rounded text-white bg-gray-400">A</span>
           <select value={sectorA} onChange={(e) => setSectorA(e.target.value)}
@@ -2165,7 +2165,7 @@ export default function BDDashboard() {
             {tab === 'overview'  && <OverviewTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} stats={bd.stats} analyticsAvailable={bd.stats.analyticsAvailable} isFiltered={isFiltered} campaignStats={bd.campaignStats} />}
             {tab === 'sectors'   && <SectorsTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} isFiltered={isFiltered} campaignStats={bd.campaignStats} />}
             {tab === 'states'    && <StatesTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} isFiltered={isFiltered} />}
-            {tab === 'compare'   && <CompareTab filteredCampaigns={bd.filteredCampaigns} filteredEmails={bd.filteredEmails} sectorA={sectorA} setSectorA={setSectorA} sectorB={sectorB} setSectorB={setSectorB} />}
+            {tab === 'compare'   && <CompareTab filteredCampaigns={bd.compareCampaigns} filteredEmails={bd.compareEmails} sectorA={sectorA} setSectorA={setSectorA} sectorB={sectorB} setSectorB={setSectorB} />}
             {tab === 'inbox'     && <InboxTab emails={bd.filteredEmails} />}
             {tab === 'analytics' && <AnalyticsTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} campaignStats={bd.campaignStats} />}
             {tab === 'debug'     && <DebugTab data={bd.data} />}
