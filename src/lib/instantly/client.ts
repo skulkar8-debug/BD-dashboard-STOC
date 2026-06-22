@@ -30,8 +30,8 @@ async function get<T>(
         const text = await res.text();
         throw new Error(`Instantly ${path} → 429: ${text.slice(0, 300)}`);
       }
-      // Back off: 6s, 12s, 24s, 48s — lets the 60-second rate-limit window clear
-      const wait = 6000 * Math.pow(2, attempt);
+      // Back off: 3s, 6s, 12s, 24s
+      const wait = 3000 * Math.pow(2, attempt);
       await sleep(wait);
       continue;
     }
@@ -117,8 +117,8 @@ export async function fetchReceivedEmails(
     preview_only: 'false',
   };
   if (campaignId) params.campaign_id = campaignId;
-  // 350ms between pages keeps requests well under the 20 req/min rate limit per key
-  return paginateItems<InstantlyEmail>(apiKey, '/emails', params, limit, 350);
+  // 100ms between pages; retry-with-backoff in get() handles any 429s
+  return paginateItems<InstantlyEmail>(apiKey, '/emails', params, limit, 100);
 }
 
 export async function fetchEmailById(
