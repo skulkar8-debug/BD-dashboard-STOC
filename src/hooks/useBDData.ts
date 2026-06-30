@@ -12,10 +12,11 @@ export type FilterState = {
   datePreset: DatePreset;
   from_date: string;
   to_date: string;
-  orgs: string[];      // org ids, [] = all
-  sectors: string[];   // sector names, [] = all
-  state: string;       // '' = all (single)
-  campaigns: string[]; // campaign_ids, [] = all
+  orgs: string[];       // org ids, [] = all
+  sectors: string[];    // sector names, [] = all
+  bd_owners: string[];  // bd owner names, [] = all
+  state: string;        // '' = all (single)
+  campaigns: string[];  // campaign_ids, [] = all
   campaign_status: string;
   has_positive_replies: '' | 'yes' | 'no';
   recommended_action: string;
@@ -53,6 +54,7 @@ export function defaultFilters(): FilterState {
     ...presetDates('last_30'),
     orgs: [],
     sectors: [],
+    bd_owners: [],
     state: '',
     campaigns: [],
     campaign_status: '',
@@ -105,13 +107,14 @@ export function useBDData() {
     return allEmails.filter((e) => {
       if (filters.orgs.length > 0 && !filters.orgs.includes(e.org_id)) return false;
       if (filters.sectors.length > 0 && !filters.sectors.includes(e.sector)) return false;
+      if (filters.bd_owners.length > 0 && !filters.bd_owners.includes(e.bd_owner)) return false;
       if (filters.state && e.state !== filters.state) return false;
       if (filters.campaigns.length > 0 && !filters.campaigns.includes(e.campaign_id)) return false;
       if (filters.from_date && e.date_local < filters.from_date) return false;
       if (filters.to_date && e.date_local > filters.to_date) return false;
       return true;
     });
-  }, [allEmails, filters.orgs, filters.sectors, filters.state, filters.campaigns, filters.from_date, filters.to_date]);
+  }, [allEmails, filters.orgs, filters.sectors, filters.bd_owners, filters.state, filters.campaigns, filters.from_date, filters.to_date]);
 
   const campaignPositiveMap = useMemo(() => {
     const m = new Map<string, boolean>();
@@ -125,6 +128,7 @@ export function useBDData() {
     return allCampaigns.filter((c) => {
       if (filters.orgs.length > 0 && !filters.orgs.includes(c.org_id)) return false;
       if (filters.sectors.length > 0 && !filters.sectors.includes(c.sector)) return false;
+      if (filters.bd_owners.length > 0 && !filters.bd_owners.includes(c.bd_owner)) return false;
       if (filters.state && c.state !== filters.state) return false;
       if (filters.campaigns.length > 0 && !filters.campaigns.includes(c.campaign_id)) return false;
       if (filters.campaign_status && c.campaign_status !== filters.campaign_status) return false;
@@ -139,6 +143,7 @@ export function useBDData() {
     return allEmails.filter((e) => {
       if (filters.orgs.length > 0 && !filters.orgs.includes(e.org_id)) return false;
       if (filters.sectors.length > 0 && !filters.sectors.includes(e.sector)) return false;
+      if (filters.bd_owners.length > 0 && !filters.bd_owners.includes(e.bd_owner)) return false;
       if (filters.state && e.state !== filters.state) return false;
       if (filters.campaigns.length > 0 && !filters.campaigns.includes(e.campaign_id)) return false;
       if (filters.from_date && e.date_local < filters.from_date) return false;
@@ -147,12 +152,12 @@ export function useBDData() {
     });
   }, [allEmails, filters]);
 
-  // Compare tab: same filters as filtered* but WITHOUT the sectors dimension,
-  // because CompareTab applies its own per-sector segmentation.
+  // Compare tab: same filters as filtered* but WITHOUT sectors or bd_owners,
+  // because CompareTab does its own segmentation by those dimensions.
   const compareCampaigns = useMemo(() => {
     return allCampaigns.filter((c) => {
       if (filters.orgs.length > 0 && !filters.orgs.includes(c.org_id)) return false;
-      // ← no sector filter here
+      // ← no sector / bd_owner filter here
       if (filters.state && c.state !== filters.state) return false;
       if (filters.campaigns.length > 0 && !filters.campaigns.includes(c.campaign_id)) return false;
       if (filters.campaign_status && c.campaign_status !== filters.campaign_status) return false;
@@ -166,7 +171,7 @@ export function useBDData() {
   const compareEmails = useMemo(() => {
     return allEmails.filter((e) => {
       if (filters.orgs.length > 0 && !filters.orgs.includes(e.org_id)) return false;
-      // ← no sector filter here
+      // ← no sector / bd_owner filter here
       if (filters.state && e.state !== filters.state) return false;
       if (filters.campaigns.length > 0 && !filters.campaigns.includes(e.campaign_id)) return false;
       if (filters.from_date && e.date_local < filters.from_date) return false;
@@ -211,6 +216,7 @@ export function useBDData() {
       orgs: [...new Map(allCampaigns.map((c) => [c.org_id, c.org_label])).entries()]
         .map(([id, label]) => ({ id, label })),
       sectors: [...new Set(orgCampaigns.map((c) => c.sector))].filter(Boolean).sort(),
+      bd_owners: [...new Set(orgCampaigns.map((c) => c.bd_owner))].filter(Boolean).sort(),
       states: [...new Set(
         sectorCampaigns.map((c) => c.state).filter((s) => s && s !== 'Unmapped')
       )].sort(),

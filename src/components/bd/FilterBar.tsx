@@ -18,6 +18,7 @@ type Props = {
   options: {
     orgs: { id: string; label: string }[];
     sectors: string[];
+    bd_owners: string[];
     states: string[];
     campaigns: { id: string; name: string; org: string }[];
     campaign_statuses: string[];
@@ -64,6 +65,7 @@ function MultiSel({
   selected,
   onChange,
   maxWidth = 'max-w-[220px]',
+  searchable = false,
 }: {
   label: string;
   placeholder: string;
@@ -71,8 +73,10 @@ function MultiSel({
   selected: string[];
   onChange: (v: string[]) => void;
   maxWidth?: string;
+  searchable?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -117,8 +121,20 @@ function MultiSel({
 
       {open && (
         <div className={`absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg py-1 ${maxWidth} min-w-[160px]`}
-          style={{ maxHeight: '280px', overflowY: 'auto', zIndex: 9999 }}
+          style={{ maxHeight: '320px', overflowY: 'auto', zIndex: 9999 }}
         >
+          {searchable && (
+            <div className="px-2 pt-1.5 pb-1 border-b border-gray-100 sticky top-0 bg-white">
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search..."
+                className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+          )}
           {items.length === 0 ? (
             <div className="px-3 py-2 text-xs text-gray-400 italic">No options</div>
           ) : (
@@ -132,7 +148,7 @@ function MultiSel({
                   Clear all
                 </button>
               )}
-              {items.map((item) => {
+              {items.filter(item => !searchable || !search || item.label.toLowerCase().includes(search.toLowerCase())).map((item) => {
                 const checked = selected.includes(item.id);
                 return (
                   <button
@@ -187,7 +203,7 @@ function DateInput({
 
 export function FilterBar({ filters, options, updateFilter, setDatePreset, resetFilters }: Props) {
   const activeCount = [
-    ...filters.orgs, ...filters.sectors, ...filters.campaigns,
+    ...filters.orgs, ...filters.sectors, ...filters.bd_owners, ...filters.campaigns,
     filters.state, filters.campaign_status, filters.has_positive_replies, filters.recommended_action,
     filters.datePreset !== 'last_30' ? 'x' : '',
   ].filter(Boolean).length;
@@ -248,7 +264,19 @@ export function FilterBar({ filters, options, updateFilter, setDatePreset, reset
             updateFilter('sectors', v);
             updateFilter('state', '');
           }}
+          searchable
         />
+
+        {/* BD Owner multi-select */}
+        {options.bd_owners.length > 0 && (
+          <MultiSel
+            label="BD Owner"
+            placeholder="All owners"
+            items={options.bd_owners.map((o) => ({ id: o, label: o }))}
+            selected={filters.bd_owners}
+            onChange={(v) => updateFilter('bd_owners', v)}
+          />
+        )}
 
         {/* State single-select (cascades from orgs + sectors) */}
         <Sel label="State" value={filters.state} onChange={(v) => updateFilter('state', v)}>

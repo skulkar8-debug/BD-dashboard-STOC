@@ -249,76 +249,38 @@ function classifyFromText(rawText: string): ReplyClassification {
 }
 
 export function classifyEmail(email: InstantlyEmail): ReplyClassification {
-  // ── Step 1: Respect Instantly's i_status field ───────────────────────────────
-  // i_status -1 = Not Interested  (confirmed: 0 of these have positive ai_interest_value)
-  // i_status  1 = Interested/engaged (Instantly detected engagement)
-  // i_status  0 / null = not set
-  if (email.i_status === -1) {
-    return 'not_interested';
-  }
-
   const bodyText = email.body?.text ?? email.content_preview ?? '';
   const textClass = classifyFromText(bodyText);
 
-  // ── Step 1b: i_status=1 safety net ───────────────────────────────────────────
-  // Instantly flagged this lead as interested/engaged. If our text classifier
-  // can't find a specific signal (neutral), lean positive rather than silently
-  // dropping it. Only apply when text isn't explicitly negative.
-  if (
-    email.i_status === 1 &&
-    textClass === 'neutral_needs_review' &&
-    (email.ai_interest_value == null || email.ai_interest_value >= 0)
-  ) {
-    return 'more_info_requested'; // conservative positive — appears in inbox
+  // Automated/system signals always take precedence — these are never human intent
+  if (textClass === 'bounce')        return 'bounce';
+  if (textClass === 'auto_reply')    return 'auto_reply';
+  if (textClass === 'out_of_office') return 'out_of_office';
+  if (textClass === 'unsubscribe')   return 'unsubscribe';
+
+  // Trust Instantly's i_status as the primary positive/negative signal
+  // i_status 1 = Instantly marked interested, -1 = not interested, 0/null = not set
+  if (email.i_status === 1) {
+    if (textClass === 'not_interested')      return 'not_interested'; // explicit opt-out overrides
+    if (textClass === 'meeting_requested')   return 'meeting_requested';
+    if (textClass === 'referral_given')      return 'referral_given';
+    if (textClass === 'more_info_requested') return 'more_info_requested';
+    return 'positive_interested';
   }
+  if (email.i_status === -1) return 'not_interested';
 
-  // ── Step 2: Instantly AI value ───────────────────────────────────────────────
-  //   >= 2 = clearly positive
-  //    1   = mild interest / borderline
-  //    0   = neutral
-  //   -1   = negative
-  if (email.ai_interest_value != null) {
-
-    if (email.ai_interest_value >= 2) {
-      // AI says positive — but automated/system replies and clear negatives always win
-      if (textClass === 'bounce')          return 'bounce';
-      if (textClass === 'auto_reply')      return 'auto_reply';
-      if (textClass === 'out_of_office')   return 'out_of_office';
-      if (textClass === 'unsubscribe')     return 'unsubscribe';
-      if (textClass === 'not_interested')  return 'not_interested';
-      if (textClass === 'meeting_requested')   return 'meeting_requested';
-      if (textClass === 'referral_given')      return 'referral_given';
-      if (textClass === 'more_info_requested') return 'more_info_requested';
-      return 'positive_interested';
-    }
-
-    if (email.ai_interest_value === 1) {
-      // Mild AI interest — only upgrade if text confirms a clear positive signal
-      if (textClass === 'bounce')          return 'bounce';
-      if (textClass === 'auto_reply')      return 'auto_reply';
-      if (textClass === 'out_of_office')   return 'out_of_office';
-      if (textClass === 'unsubscribe')     return 'unsubscribe';
-      if (textClass === 'not_interested')  return 'not_interested';
-      if (textClass === 'meeting_requested')   return 'meeting_requested';
-      if (textClass === 'referral_given')      return 'referral_given';
-      if (textClass === 'more_info_requested') return 'more_info_requested';
-      if (textClass === 'positive_interested') return 'positive_interested';
-      return 'neutral_needs_review';
-    }
-
-    if (email.ai_interest_value === -1) {
-      // Instantly says NEGATIVE — automated signals and referrals override; everything else → not_interested
-      if (textClass === 'bounce')         return 'bounce';
-      if (textClass === 'auto_reply')     return 'auto_reply';
-      if (textClass === 'out_of_office')  return 'out_of_office';
-      if (textClass === 'unsubscribe')    return 'unsubscribe';
-      if (textClass === 'referral_given') return 'referral_given';
-      return 'not_interested';
-    }
-
-    // ai_interest_value === 0 — fall through to text classification
+  // Trust Instantly's AI interest value as secondary signal
+  // >= 1 = positive interest, -1 = negative, 0/null = no signal
+  if (email.ai_interest_value != null && email.ai_interest_value >= 1) {
+    if (textClass === 'not_interested')      return 'not_interested';
+    if (textClass === 'meeting_requested')   return 'meeting_requested';
+    if (textClass === 'referral_given')      return 'referral_given';
+    if (textClass === 'more_info_requested') return 'more_info_requested';
+    return 'positive_interested';
   }
+  if (email.ai_interest_value === -1) return 'not_interested';
 
+  // No Instantly signal set — fall back to text classification
   return textClass;
 }
 

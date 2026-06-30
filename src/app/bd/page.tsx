@@ -23,9 +23,11 @@ import Image from 'next/image';
 const VALID_TABS = ['overview','sectors','states','compare','inbox','analytics','debug'] as const;
 type TabId = typeof VALID_TABS[number];
 
-function parseUrl(): { filters: FilterState; tab: TabId; sectorA: string; sectorB: string } {
+type CompareMode = 'sector' | 'owner';
+
+function parseUrl(): { filters: FilterState; tab: TabId; sectorA: string; sectorB: string; compareMode: CompareMode; ownerA: string; ownerB: string } {
   const def = defaultFilters();
-  if (typeof window === 'undefined') return { filters: def, tab: 'overview', sectorA: '', sectorB: '' };
+  if (typeof window === 'undefined') return { filters: def, tab: 'overview', sectorA: '', sectorB: '', compareMode: 'sector', ownerA: '', ownerB: '' };
   const p = new URLSearchParams(window.location.search);
 
   const dp = (p.get('dp') ?? def.datePreset) as DatePreset;
@@ -43,6 +45,7 @@ function parseUrl(): { filters: FilterState; tab: TabId; sectorA: string; sector
       to_date: dates.to_date,
       orgs: p.getAll('org'),
       sectors: p.getAll('sec'),
+      bd_owners: p.getAll('bdo'),
       state: p.get('st') ?? '',
       campaigns: p.getAll('c'),
       campaign_status: p.get('cs') ?? '',
@@ -52,10 +55,13 @@ function parseUrl(): { filters: FilterState; tab: TabId; sectorA: string; sector
     tab,
     sectorA: p.get('sa') ?? '',
     sectorB: p.get('sb') ?? '',
+    compareMode: (p.get('cm') ?? 'sector') as CompareMode,
+    ownerA: p.get('oa') ?? '',
+    ownerB: p.get('ob') ?? '',
   };
 }
 
-function buildUrl(filters: FilterState, tab: TabId, sectorA: string, sectorB: string): string {
+function buildUrl(filters: FilterState, tab: TabId, sectorA: string, sectorB: string, compareMode: CompareMode, ownerA: string, ownerB: string): string {
   const p = new URLSearchParams();
   if (tab !== 'overview') p.set('tab', tab);
   if (filters.datePreset !== 'last_30') p.set('dp', filters.datePreset);
@@ -65,6 +71,7 @@ function buildUrl(filters: FilterState, tab: TabId, sectorA: string, sectorB: st
   }
   filters.orgs.forEach((v) => p.append('org', v));
   filters.sectors.forEach((v) => p.append('sec', v));
+  filters.bd_owners.forEach((v) => p.append('bdo', v));
   if (filters.state) p.set('st', filters.state);
   filters.campaigns.forEach((v) => p.append('c', v));
   if (filters.campaign_status) p.set('cs', filters.campaign_status);
@@ -72,6 +79,9 @@ function buildUrl(filters: FilterState, tab: TabId, sectorA: string, sectorB: st
   if (filters.recommended_action) p.set('ra', filters.recommended_action);
   if (sectorA) p.set('sa', sectorA);
   if (sectorB) p.set('sb', sectorB);
+  if (compareMode !== 'sector') p.set('cm', compareMode);
+  if (ownerA) p.set('oa', ownerA);
+  if (ownerB) p.set('ob', ownerB);
   const qs = p.toString();
   return qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
 }
@@ -1565,6 +1575,41 @@ function buildProfile(sector: string, camps: NormalizedCampaign[], emails: Norma
   return { label: sector, campaigns, emails: sEmails, positive, human, sent, byState, byMonth, byClass };
 }
 
+function buildOwnerProfile(owner: string, camps: NormalizedCampaign[], emails: NormalizedEmail[]): SectorProfile {
+  const campaigns = camps.filter((c) => c.bd_owner === owner);
+  const sEmails = emails.filter((e) => e.bd_owner === owner);
+  const positive = sEmails.filter((e) => e.is_positive);
+  const human = sEmails.filter((e) => !e.is_auto_reply && e.final_classification !== 'unsubscribe');
+  const sent = campaigns.reduce((s, c) => s + c.sent, 0);
+
+  const byState = new Map<string, { replies: number; positive: number }>();
+  sEmails.forEach((e) => {
+    if (!e.state || e.state === 'Unmapped') return;
+    const cur = byState.get(e.state) ?? { replies: 0, positive: 0 };
+    cur.replies++;
+    if (e.is_positive) cur.positive++;
+    byState.set(e.state, cur);
+  });
+
+  const ACTIONABLE = new Set(['positive_interested','meeting_requested','referral_given','more_info_requested']);
+  const byMonth = new Map<string, { total: number; actionable: number }>();
+  sEmails.forEach((e) => {
+    if (!e.timestamp_email || e.timestamp_email.length < 7) return;
+    const key = e.timestamp_email.slice(0, 7);
+    const z = byMonth.get(key) ?? { total: 0, actionable: 0 };
+    z.total++;
+    if (ACTIONABLE.has(e.final_classification)) z.actionable++;
+    byMonth.set(key, z);
+  });
+
+  const byClass = new Map<string, number>();
+  sEmails.forEach((e) => {
+    byClass.set(e.final_classification, (byClass.get(e.final_classification) ?? 0) + 1);
+  });
+
+  return { label: owner, campaigns, emails: sEmails, positive, human, sent, byState, byMonth, byClass };
+}
+
 function CmpKpi({ label, a, b, colorA, colorB, higherBetter = true, fmt: f }: {
   label: string; a: number; b: number; colorA: string; colorB: string; higherBetter?: boolean; fmt?: (n: number) => string;
 }) {
@@ -1647,25 +1692,43 @@ function MonthlyBarChart({
   );
 }
 
-function CompareTab({ filteredCampaigns, filteredEmails, sectorA, setSectorA, sectorB, setSectorB }: {
+function CompareTab({ filteredCampaigns, filteredEmails, sectorA, setSectorA, sectorB, setSectorB, compareMode, setCompareMode, ownerA, setOwnerA, ownerB, setOwnerB }: {
   filteredCampaigns: NormalizedCampaign[];
   filteredEmails: NormalizedEmail[];
   sectorA: string; setSectorA: (s: string) => void;
   sectorB: string; setSectorB: (s: string) => void;
+  compareMode: CompareMode; setCompareMode: (m: CompareMode) => void;
+  ownerA: string; setOwnerA: (s: string) => void;
+  ownerB: string; setOwnerB: (s: string) => void;
 }) {
   const sectorList = useMemo(() => {
     const present = new Set(filteredCampaigns.map((c) => c.sector));
     return SECTOR_OPTIONS.filter((s) => present.has(s) && s !== 'Other / Unmapped');
   }, [filteredCampaigns]);
 
+  const ownerList = useMemo(() => {
+    return [...new Set(filteredCampaigns.map((c) => c.bd_owner).filter(Boolean))].sort();
+  }, [filteredCampaigns]);
+
   // Auto-select first two when list becomes available and nothing is set yet
   useEffect(() => {
-    if (sectorList.length > 0 && !sectorA) setSectorA(sectorList[0]);
-    if (sectorList.length > 1 && !sectorB) setSectorB(sectorList[1]);
-  }, [sectorList, sectorA, sectorB, setSectorA, setSectorB]);
+    if (compareMode === 'sector') {
+      if (sectorList.length > 0 && !sectorA) setSectorA(sectorList[0]);
+      if (sectorList.length > 1 && !sectorB) setSectorB(sectorList[1]);
+    } else {
+      if (ownerList.length > 0 && !ownerA) setOwnerA(ownerList[0]);
+      if (ownerList.length > 1 && !ownerB) setOwnerB(ownerList[1]);
+    }
+  }, [sectorList, ownerList, compareMode, sectorA, sectorB, ownerA, ownerB, setSectorA, setSectorB, setOwnerA, setOwnerB]);
 
-  const profA = useMemo(() => sectorA ? buildProfile(sectorA, filteredCampaigns, filteredEmails) : null, [sectorA, filteredCampaigns, filteredEmails]);
-  const profB = useMemo(() => sectorB ? buildProfile(sectorB, filteredCampaigns, filteredEmails) : null, [sectorB, filteredCampaigns, filteredEmails]);
+  const profA = useMemo(() => {
+    if (compareMode === 'sector') return sectorA ? buildProfile(sectorA, filteredCampaigns, filteredEmails) : null;
+    return ownerA ? buildOwnerProfile(ownerA, filteredCampaigns, filteredEmails) : null;
+  }, [compareMode, sectorA, ownerA, filteredCampaigns, filteredEmails]);
+  const profB = useMemo(() => {
+    if (compareMode === 'sector') return sectorB ? buildProfile(sectorB, filteredCampaigns, filteredEmails) : null;
+    return ownerB ? buildOwnerProfile(ownerB, filteredCampaigns, filteredEmails) : null;
+  }, [compareMode, sectorB, ownerB, filteredCampaigns, filteredEmails]);
 
   const allMonths = useMemo(() => {
     const s = new Set([...(profA ? [...profA.byMonth.keys()] : []), ...(profB ? [...profB.byMonth.keys()] : [])]);
@@ -1707,32 +1770,70 @@ function CompareTab({ filteredCampaigns, filteredEmails, sectorA, setSectorA, se
     }, { A: 0, B: 0 });
   }, [profA, profB, posRateA, posRateB]);
 
-  const sectorSelector = (
+  const compareSelector = (
     <div className="bg-white border border-gray-200 rounded-xl px-5 py-4 shadow-sm">
       <div className="flex flex-wrap items-center gap-4">
-        <span className="text-sm font-semibold text-gray-600">Compare sectors <span className="text-gray-400 font-normal text-xs">(date · org · state filters apply — sector filter ignored)</span></span>
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-bold px-2 py-0.5 rounded text-white bg-gray-400">A</span>
-          <select value={sectorA} onChange={(e) => setSectorA(e.target.value)}
-            className="text-sm rounded-lg border border-gray-300 px-3 py-1.5 font-medium text-gray-700 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-300">
-            <option value="">Select sector</option>
-            {sectorList.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
+        {/* Mode toggle */}
+        <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-semibold">
+          <button type="button" onClick={() => setCompareMode('sector')}
+            className={`px-3 py-1.5 transition-colors ${compareMode === 'sector' ? 'bg-gray-700 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
+            By Sector
+          </button>
+          <button type="button" onClick={() => setCompareMode('owner')}
+            className={`px-3 py-1.5 transition-colors ${compareMode === 'owner' ? 'bg-gray-700 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
+            By BD Owner
+          </button>
         </div>
-        <span className="text-gray-300 text-xl font-light">vs</span>
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-bold px-2 py-0.5 rounded text-white bg-gray-400">B</span>
-          <select value={sectorB} onChange={(e) => setSectorB(e.target.value)}
-            className="text-sm rounded-lg border border-gray-300 px-3 py-1.5 font-medium text-gray-700 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-300">
-            <option value="">Select sector</option>
-            {sectorList.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-        </div>
+        <span className="text-gray-300 text-sm">|</span>
+        <span className="text-xs text-gray-400">date · org · state filters apply — {compareMode === 'sector' ? 'sector' : 'BD owner'} filter ignored</span>
+
+        {compareMode === 'sector' ? (
+          <>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold px-2 py-0.5 rounded text-white bg-gray-400">A</span>
+              <select value={sectorA} onChange={(e) => setSectorA(e.target.value)}
+                className="text-sm rounded-lg border border-gray-300 px-3 py-1.5 font-medium text-gray-700 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-300">
+                <option value="">Select sector</option>
+                {sectorList.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <span className="text-gray-300 text-xl font-light">vs</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold px-2 py-0.5 rounded text-white bg-gray-400">B</span>
+              <select value={sectorB} onChange={(e) => setSectorB(e.target.value)}
+                className="text-sm rounded-lg border border-gray-300 px-3 py-1.5 font-medium text-gray-700 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-300">
+                <option value="">Select sector</option>
+                {sectorList.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold px-2 py-0.5 rounded text-white bg-gray-400">A</span>
+              <select value={ownerA} onChange={(e) => setOwnerA(e.target.value)}
+                className="text-sm rounded-lg border border-gray-300 px-3 py-1.5 font-medium text-gray-700 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-300">
+                <option value="">Select owner</option>
+                {ownerList.map((o) => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+            <span className="text-gray-300 text-xl font-light">vs</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold px-2 py-0.5 rounded text-white bg-gray-400">B</span>
+              <select value={ownerB} onChange={(e) => setOwnerB(e.target.value)}
+                className="text-sm rounded-lg border border-gray-300 px-3 py-1.5 font-medium text-gray-700 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-300">
+                <option value="">Select owner</option>
+                {ownerList.map((o) => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
 
-  if (!profA || !profB) return <div className="space-y-4">{sectorSelector}<div className="text-center py-16 text-gray-400 text-sm">Select two sectors to compare</div></div>;
+  const emptyMsg = compareMode === 'sector' ? 'Select two sectors to compare' : ownerList.length === 0 ? 'No BD owners assigned to campaigns yet' : 'Select two BD owners to compare';
+  if (!profA || !profB) return <div className="space-y-4">{compareSelector}<div className="text-center py-16 text-gray-400 text-sm">{emptyMsg}</div></div>;
 
   const winner: 'A' | 'B' | null = scores.A > scores.B ? 'A' : scores.B > scores.A ? 'B' : null;
   // Dynamic colors: winner = green, loser = blue, tied = grey
@@ -1743,7 +1844,7 @@ function CompareTab({ filteredCampaigns, filteredEmails, sectorA, setSectorA, se
 
   return (
     <div className="space-y-5">
-      {sectorSelector}
+      {compareSelector}
 
       {/* Scoreboard */}
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
@@ -2059,6 +2160,9 @@ export default function BDDashboard() {
   const [tab, setTab] = useState<TabId>('overview');
   const [sectorA, setSectorA] = useState('');
   const [sectorB, setSectorB] = useState('');
+  const [compareMode, setCompareMode] = useState<CompareMode>('sector');
+  const [ownerA, setOwnerA] = useState('');
+  const [ownerB, setOwnerB] = useState('');
   const [copied, setCopied] = useState(false);
   const [urlReady, setUrlReady] = useState(false);
 
@@ -2071,16 +2175,19 @@ export default function BDDashboard() {
     setTab(parsed.tab);
     if (parsed.sectorA) setSectorA(parsed.sectorA);
     if (parsed.sectorB) setSectorB(parsed.sectorB);
+    setCompareMode(parsed.compareMode);
+    if (parsed.ownerA) setOwnerA(parsed.ownerA);
+    if (parsed.ownerB) setOwnerB(parsed.ownerB);
     setUrlReady(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally run once on mount
 
-  // Sync URL whenever filters/tab/sectors change (after initial parse)
+  // Sync URL whenever filters/tab/sectors/compare change (after initial parse)
   useEffect(() => {
     if (!urlReady) return;
-    const url = buildUrl(bd.filters, tab, sectorA, sectorB);
+    const url = buildUrl(bd.filters, tab, sectorA, sectorB, compareMode, ownerA, ownerB);
     window.history.replaceState(null, '', url);
-  }, [bd.filters, tab, sectorA, sectorB, urlReady]);
+  }, [bd.filters, tab, sectorA, sectorB, compareMode, ownerA, ownerB, urlReady]);
 
   const copyLink = useCallback(() => {
     const url = window.location.href;
@@ -2183,7 +2290,7 @@ export default function BDDashboard() {
             {tab === 'overview'  && <OverviewTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} stats={bd.stats} analyticsAvailable={bd.stats.analyticsAvailable} isFiltered={isFiltered} campaignStats={bd.campaignStats} />}
             {tab === 'sectors'   && <SectorsTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} isFiltered={isFiltered} campaignStats={bd.campaignStats} />}
             {tab === 'states'    && <StatesTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} isFiltered={isFiltered} />}
-            {tab === 'compare'   && <CompareTab filteredCampaigns={bd.compareCampaigns} filteredEmails={bd.compareEmails} sectorA={sectorA} setSectorA={setSectorA} sectorB={sectorB} setSectorB={setSectorB} />}
+            {tab === 'compare'   && <CompareTab filteredCampaigns={bd.compareCampaigns} filteredEmails={bd.compareEmails} sectorA={sectorA} setSectorA={setSectorA} sectorB={sectorB} setSectorB={setSectorB} compareMode={compareMode} setCompareMode={setCompareMode} ownerA={ownerA} setOwnerA={setOwnerA} ownerB={ownerB} setOwnerB={setOwnerB} />}
             {tab === 'inbox'     && <InboxTab emails={bd.filteredEmails} />}
             {tab === 'analytics' && <AnalyticsTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} campaignStats={bd.campaignStats} />}
             {tab === 'debug'     && <DebugTab data={bd.data} />}
