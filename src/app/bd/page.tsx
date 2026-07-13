@@ -686,10 +686,15 @@ function SectorsTab({ campaigns, emails, isFiltered, campaignStats }: { campaign
     <div className="rounded-xl border border-gray-200 overflow-hidden">
       <table className="w-full text-sm">
         <thead><tr className="bg-gray-50 border-b border-gray-200 text-xs text-gray-400 uppercase tracking-wide">
-          {['Sector','Campaigns','States','Sent †','Replies','Reply% †','Positive','Pos%','Opps'].map((h) => (
-            <th key={h} title={h.includes('†') ? 'Denominator is all-time sent from Instantly analytics' : undefined}
-              className={`py-2 px-3 ${h==='Sector'?'text-left':'text-right'}`}>{h}</th>
-          ))}
+          <th className="py-2 px-3 text-left">Sector</th>
+          <th className="py-2 px-3 text-right">Campaigns</th>
+          <th className="py-2 px-3 text-right">States</th>
+          <th className="py-2 px-3 text-right" title="All-time sent from Instantly analytics — not date-filterable">Sent †</th>
+          <th className="py-2 px-3 text-right text-blue-500" title="Date-filtered replies received">Replies ✦</th>
+          <th className="py-2 px-3 text-right" title="Replies ÷ all-time sent — denominator is not date-filtered">Reply% †</th>
+          <th className="py-2 px-3 text-right text-blue-500" title="Date-filtered positive replies">Positive ✦</th>
+          <th className="py-2 px-3 text-right text-emerald-600 font-semibold" title="Positive ÷ replies received — both date-filtered. Use this for decisions.">Pos% of Replies ✦</th>
+          <th className="py-2 px-3 text-right">Opps</th>
         </tr></thead>
         <tbody>
           {rows.map(([sector, d]) => {
@@ -700,11 +705,11 @@ function SectorsTab({ campaigns, emails, isFiltered, campaignStats }: { campaign
                 <td className="py-2 px-3 font-medium text-blue-600">{sector}</td>
                 <td className="text-right px-3">{d.campaigns.length}</td>
                 <td className="text-right px-3">{new Set(d.campaigns.map((c) => c.state)).size}</td>
-                <td className="text-right px-3">{fmt(sent)}</td>
+                <td className="text-right px-3 text-gray-400">{fmt(sent)}</td>
                 <td className="text-right px-3">{d.emails.length}</td>
-                <td className="text-right px-3"><ScopedRate num={d.emails.length} den={sent} isFiltered={isFiltered} /></td>
+                <td className="text-right px-3 text-gray-400"><ScopedRate num={d.emails.length} den={sent} isFiltered={isFiltered} /></td>
                 <td className="text-right px-3 text-emerald-600 font-semibold">{pos}</td>
-                <td className="text-right px-3">{pct(pos, d.emails.length)}</td>
+                <td className="text-right px-3 font-bold text-emerald-600">{pct(pos, d.emails.length)}</td>
                 <td className="text-right px-3">{d.campaigns.reduce((s, c) => s + c.opportunities, 0)}</td>
               </tr>
             );
@@ -2310,8 +2315,16 @@ function SentimentBox({ group }: { group: SentimentGroup }) {
               )}
             </div>
           </div>
-          <div className="text-right shrink-0 text-[11px] text-gray-400">
-            {group.campaigns.length} campaign{group.campaigns.length !== 1 ? 's' : ''}
+          <div className="text-right shrink-0 space-y-0.5">
+            <div className="text-[11px] text-gray-400">{group.campaigns.length} campaign{group.campaigns.length !== 1 ? 's' : ''}</div>
+            {hasReplies && (
+              <div className="flex items-center justify-end gap-2">
+                <span className="text-[11px] text-gray-500 tabular-nums">{analyzedEmails.length} replies</span>
+                <span className="text-xs font-bold tabular-nums text-emerald-600">
+                  {pct(themeCounts.positive ?? 0, analyzedEmails.length)} positive
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </div>
