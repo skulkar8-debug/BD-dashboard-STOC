@@ -2277,12 +2277,12 @@ function SentimentBox({ group }: { group: SentimentGroup }) {
 
   const summary = useMemo(() => generateSentimentSummary(themeCounts, analyzedEmails.length), [themeCounts, analyzedEmails.length]);
 
-  const totalReceived = group.emails.length;
   const automatedCount = group.emails.filter((e) => {
     const cls = e.final_classification;
     return cls === 'bounce' || cls === 'auto_reply' || cls === 'out_of_office';
   }).length;
   const hasReplies = analyzedEmails.length > 0;
+  const otherCount = topThemes.slice(5).reduce((s, t) => s + t.count, 0);
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
@@ -2310,128 +2310,108 @@ function SentimentBox({ group }: { group: SentimentGroup }) {
         </div>
       </div>
 
-      <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-5">
-        {/* Left: Top Reply Sentiments */}
-        <div>
-          <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-3">Top Reply Sentiments</div>
-          {!hasReplies ? (
-            <div className="space-y-2.5">
-              {[1,2,3,4,5].map((i) => (
-                <div key={i} className="flex items-center gap-2.5">
-                  <span className="w-4 text-xs font-bold text-gray-300 shrink-0">{i}.</span>
-                  <span className="text-xs text-gray-300 italic">N/A</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="space-y-1">
-              {Array.from({ length: 5 }, (_, i) => {
-                const entry = topThemes[i];
-                if (!entry) {
-                  return (
-                    <div key={i} className="flex items-center gap-2.5 py-1">
-                      <span className="w-4 text-xs font-bold text-gray-300 shrink-0">{i + 1}.</span>
-                      <span className="text-xs text-gray-300 italic">N/A</span>
-                    </div>
-                  );
-                }
-                const cfg = DISPLAY_THEME_CONFIG[entry.id];
-                const pcnt = (entry.count / analyzedEmails.length * 100).toFixed(1);
-                const barPct = topThemes[0] ? (entry.count / topThemes[0].count) * 100 : 0;
-                const isExpanded = expandedTheme === entry.id;
+      <div className="p-5">
+        <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-3">Top Reply Sentiments</div>
+        {!hasReplies ? (
+          <div className="space-y-2.5">
+            {[1,2,3,4,5].map((i) => (
+              <div key={i} className="flex items-center gap-2.5">
+                <span className="w-4 text-xs font-bold text-gray-300 shrink-0">{i}.</span>
+                <span className="text-xs text-gray-300 italic">N/A</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-1">
+            {Array.from({ length: 5 }, (_, i) => {
+              const entry = topThemes[i];
+              if (!entry) {
                 return (
-                  <div key={entry.id}>
-                    <button
-                      type="button"
-                      onClick={() => setExpandedTheme(isExpanded ? null : entry.id)}
-                      className="w-full flex items-center gap-2.5 py-1.5 px-1 rounded-lg hover:bg-gray-50 transition-colors text-left group"
-                    >
-                      <span className="w-4 text-xs font-bold text-gray-400 shrink-0">{i + 1}.</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-2 mb-1">
-                          <span className="text-xs font-medium text-gray-700 truncate group-hover:text-gray-900">{cfg.label}</span>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <span className="text-xs font-semibold tabular-nums text-gray-700">{entry.count}</span>
-                            <span className="text-[10px] text-gray-400 w-11 text-right tabular-nums">{pcnt}%</span>
-                            <ChevronDown className={`h-3 w-3 text-gray-300 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                          </div>
-                        </div>
-                        <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
-                          <div className="h-full rounded-full" style={{ width: `${barPct}%`, backgroundColor: cfg.color }} />
-                        </div>
-                      </div>
-                    </button>
-
-                    {/* Expanded reply list */}
-                    {isExpanded && (
-                      <div className="ml-6 mt-1 mb-2 border border-gray-100 rounded-lg overflow-hidden divide-y divide-gray-50">
-                        {entry.emails.slice(0, 10).map((e) => (
-                          <div key={e.id} className="px-3 py-2.5 bg-gray-50 hover:bg-gray-100 transition-colors">
-                            <div className="flex items-start justify-between gap-2 mb-1">
-                              <span className="text-xs font-semibold text-gray-800 truncate">{e.from_name || e.from_email || 'Unknown'}</span>
-                              <span className="text-[10px] text-gray-400 shrink-0">
-                                {e.timestamp_email ? new Date(e.timestamp_email).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}
-                              </span>
-                            </div>
-                            <div className="text-[10px] text-gray-400 mb-1 truncate">{e.campaign_name}{e.state ? ` · ${e.state}` : ''}</div>
-                            {(e.body_text || e.content_preview) && (
-                              <div className="text-xs text-gray-600 line-clamp-2 leading-relaxed">
-                                {(e.body_text || e.content_preview).slice(0, 300)}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                        {entry.emails.length > 10 && (
-                          <div className="px-3 py-2 text-[10px] text-gray-400 text-center bg-gray-50">
-                            +{entry.emails.length - 10} more replies
-                          </div>
-                        )}
-                      </div>
-                    )}
+                  <div key={i} className="flex items-center gap-2.5 py-1">
+                    <span className="w-4 text-xs font-bold text-gray-300 shrink-0">{i + 1}.</span>
+                    <span className="text-xs text-gray-300 italic">N/A</span>
                   </div>
                 );
-              })}
-              <div className="text-[10px] text-gray-400 pt-1">
-                {analyzedEmails.length} repl{analyzedEmails.length !== 1 ? 'ies' : 'y'} analyzed
-                {automatedCount > 0 && ` · ${automatedCount} automated excluded`}
-                {' · '}click any row to see replies
-              </div>
-            </div>
-          )}
-        </div>
+              }
+              const cfg = DISPLAY_THEME_CONFIG[entry.id];
+              const pcnt = (entry.count / analyzedEmails.length * 100).toFixed(1);
+              const barPct = topThemes[0] ? (entry.count / topThemes[0].count) * 100 : 0;
+              const isExpanded = expandedTheme === entry.id;
+              return (
+                <div key={entry.id}>
+                  <button
+                    type="button"
+                    onClick={() => setExpandedTheme(isExpanded ? null : entry.id)}
+                    className="w-full flex items-center gap-2.5 py-1.5 px-1 rounded-lg hover:bg-gray-50 transition-colors text-left group"
+                  >
+                    <span className="w-4 text-xs font-bold text-gray-400 shrink-0">{i + 1}.</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="text-xs font-medium text-gray-700 truncate group-hover:text-gray-900">{cfg.label}</span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className="text-xs font-semibold tabular-nums text-gray-700">{entry.count}</span>
+                          <span className="text-[10px] text-gray-400 w-11 text-right tabular-nums">{pcnt}%</span>
+                          <ChevronDown className={`h-3 w-3 text-gray-300 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                        </div>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                        <div className="h-full rounded-full" style={{ width: `${barPct}%`, backgroundColor: cfg.color }} />
+                      </div>
+                    </div>
+                  </button>
 
-        {/* Right: date-filtered reply stats only */}
-        <div>
-          <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-3">Reply Summary (Date Range)</div>
-          {totalReceived === 0 ? (
-            <div className="text-xs text-gray-400 italic">No replies received in this period.</div>
-          ) : (
-            <div className="space-y-4">
-              <div>
-                <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Volume</div>
-                <SentKpi label="Total Replies" value={fmt(totalReceived)} />
-                <SentKpi label="Meaningful Replies" value={fmt(analyzedEmails.length)} sub={automatedCount > 0 ? `${automatedCount} automated excluded` : undefined} />
-              </div>
-              <div>
-                <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Quality</div>
-                <SentKpi
-                  label="Positive Replies"
-                  value={fmt(positiveEmails.length)}
-                  sub={analyzedEmails.length > 0 ? `${pct(positiveEmails.length, analyzedEmails.length)} of meaningful replies` : undefined}
-                />
-                <SentKpi
-                  label="Not Interested"
-                  value={fmt(themeCounts.not_interested + themeCounts.wrong_contact)}
-                  sub={analyzedEmails.length > 0 ? `${pct(themeCounts.not_interested + themeCounts.wrong_contact, analyzedEmails.length)} of meaningful replies` : undefined}
-                />
-                <SentKpi
-                  label="Do Not Contact"
-                  value={themeCounts.do_not_contact > 0 ? fmt(themeCounts.do_not_contact) : '0'}
-                />
+                  {/* Expanded reply list */}
+                  {isExpanded && (
+                    <div className="ml-6 mt-1 mb-2 border border-gray-100 rounded-lg overflow-hidden divide-y divide-gray-50">
+                      {entry.emails.slice(0, 10).map((e) => (
+                        <div key={e.id} className="px-3 py-2.5 bg-gray-50 hover:bg-gray-100 transition-colors">
+                          <div className="flex items-start justify-between gap-2 mb-1">
+                            <span className="text-xs font-semibold text-gray-800 truncate">{e.from_name || e.from_email || 'Unknown'}</span>
+                            <span className="text-[10px] text-gray-400 shrink-0">
+                              {e.timestamp_email ? new Date(e.timestamp_email).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-gray-400 mb-1 truncate">{e.campaign_name}{e.state ? ` · ${e.state}` : ''}</div>
+                          {(e.body_text || e.content_preview) && (
+                            <div className="text-xs text-gray-600 line-clamp-2 leading-relaxed">
+                              {(e.body_text || e.content_preview).slice(0, 300)}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                      {entry.emails.length > 10 && (
+                        <div className="px-3 py-2 text-[10px] text-gray-400 text-center bg-gray-50">
+                          +{entry.emails.length - 10} more replies
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Other Replies row */}
+            <div className="flex items-center gap-2.5 py-1.5 px-1 border-t border-gray-100 mt-1">
+              <span className="w-4 shrink-0" />
+              <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+                <span className="text-xs text-gray-400 italic">Other Replies</span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="text-xs font-semibold tabular-nums text-gray-400">{otherCount}</span>
+                  <span className="text-[10px] text-gray-300 w-11 text-right tabular-nums">
+                    {otherCount > 0 ? `${(otherCount / analyzedEmails.length * 100).toFixed(1)}%` : ''}
+                  </span>
+                  <span className="w-3" />
+                </div>
               </div>
             </div>
-          )}
-        </div>
+
+            <div className="text-[10px] text-gray-400 pt-1">
+              {analyzedEmails.length} repl{analyzedEmails.length !== 1 ? 'ies' : 'y'} analyzed
+              {automatedCount > 0 && ` · ${automatedCount} automated excluded`}
+              {' · '}click any row to see replies
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
