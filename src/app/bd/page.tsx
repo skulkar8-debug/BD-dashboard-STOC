@@ -2168,8 +2168,13 @@ const DISPLAY_THEME_CONFIG: Record<DisplayThemeId, { label: string; color: strin
   neutral:            { label: 'Neutral / No Clear Signal',       color: '#6B7280' },
 };
 
+// Catches remove/unsubscribe intent even when Instantly overrides final_classification
+const DNC_BODY_RE = /\bremove\b.{0,80}\bfrom\b.{0,30}\b(list|email list|mailing list|marketing|database|emails?)\b|\bremoved\b.{0,30}\bfrom\b.{0,30}\b(list|marketing|database|emails?)\b|\bto be removed\b|\b(contact|email) (info|information|address).{0,50}\bremov|\bunsubscribe\b|\bopt.?out\b|\bplease (remove|unsubscribe)\b|stop (emailing|contacting|sending)|don'?t (contact|email|reach out to) (me|us) (again|anymore|further)/i;
+
 function getDisplayTheme(email: NormalizedEmail): DisplayThemeId {
   const cls = email.final_classification;
+  // Body check FIRST — overrides any Instantly signal that wrongly marks removal as positive
+  if (DNC_BODY_RE.test(email.body_text || '')) return 'dnc_not_interested';
   if (cls === 'positive_interested' || cls === 'meeting_requested' || cls === 'referral_given') return 'positive';
   if (cls === 'more_info_requested') return 'more_info';
   if (cls === 'not_interested' || cls === 'negative_complaint' || cls === 'unsubscribe') return 'dnc_not_interested';
@@ -2262,10 +2267,19 @@ function SentimentBox({ group }: { group: SentimentGroup }) {
 
   const bounceCount = group.emails.filter((e) => e.final_classification === 'bounce').length;
   const hasReplies = analyzedEmails.length > 0;
-  const otherCount = topThemes.slice(5).reduce((s, t) => s + t.count, 0);
+
+  const topThemeId = topThemes[0]?.id ?? null;
+  const BOX_THEME: Record<DisplayThemeId, { bg: string; border: string }> = {
+    positive:           { bg: 'bg-emerald-50',  border: 'border-emerald-200' },
+    more_info:          { bg: 'bg-sky-50',       border: 'border-sky-200' },
+    dnc_not_interested: { bg: 'bg-red-50',       border: 'border-red-200' },
+    automated:          { bg: 'bg-gray-50',      border: 'border-gray-200' },
+    neutral:            { bg: 'bg-gray-50',      border: 'border-gray-200' },
+  };
+  const boxStyle = topThemeId ? BOX_THEME[topThemeId] : { bg: 'bg-white', border: 'border-gray-200' };
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+    <div className={`${boxStyle.bg} border ${boxStyle.border} rounded-xl shadow-sm overflow-hidden`}>
       {/* Header */}
       <div className="px-5 py-3.5 border-b border-gray-100 bg-gray-50">
         <div className="flex items-start justify-between gap-3">
@@ -2369,21 +2383,6 @@ function SentimentBox({ group }: { group: SentimentGroup }) {
                 </div>
               );
             })}
-
-            {/* Other Replies row */}
-            <div className="flex items-center gap-2.5 py-1.5 px-1 border-t border-gray-100 mt-1">
-              <span className="w-4 shrink-0" />
-              <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
-                <span className="text-xs text-gray-400 italic">Other Replies</span>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <span className="text-xs font-semibold tabular-nums text-gray-400">{otherCount}</span>
-                  <span className="text-[10px] text-gray-300 w-11 text-right tabular-nums">
-                    {otherCount > 0 ? `${(otherCount / analyzedEmails.length * 100).toFixed(1)}%` : ''}
-                  </span>
-                  <span className="w-3" />
-                </div>
-              </div>
-            </div>
 
             <div className="text-[10px] text-gray-400 pt-1">
               {analyzedEmails.length} repl{analyzedEmails.length !== 1 ? 'ies' : 'y'} analyzed

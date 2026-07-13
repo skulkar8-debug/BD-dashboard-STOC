@@ -112,10 +112,10 @@ const UNSUBSCRIBE_PATTERNS = [
   /^(no[.,]?\s+)?stop[.,]?\s*$/im,
   /^stop (this|it|now|please)[.,]?\s*$/im,
   /\bstop (this|it|now)\b/i,
-  // "Remove from list" (standalone) or "remove [X] from your list/marketing"
-  /\bremove( .{0,80})? from (your |the )?(list|email list|mailing list|marketing|database|emails?)\b/i,
-  // "removed from your list" (passive — "I'd like to be removed from your list")
-  /\bremoved from (your |the )?(list|email list|mailing list|marketing|database|emails?)\b/i,
+  // "Remove from list" / "remove us from this list" / "remove [X] from your marketing"
+  /\bremove\b.{0,80}\bfrom\b.{0,30}\b(list|email list|mailing list|marketing|database|emails?)\b/i,
+  // "removed from your/this/the list"
+  /\bremoved\b.{0,30}\bfrom\b.{0,30}\b(list|email list|mailing list|marketing|database|emails?)\b/i,
   // "contact info to be removed" / "to be removed"
   /\bto be removed\b/i,
   // "I'd like my contact info / email address removed"
