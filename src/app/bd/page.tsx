@@ -2273,14 +2273,12 @@ function SentimentBox({ group }: { group: SentimentGroup }) {
 
   const summary = useMemo(() => generateSentimentSummary(themeCounts, analyzedEmails.length), [themeCounts, analyzedEmails.length]);
 
-  const sent = group.campaigns.reduce((s, c) => s + c.sent, 0);
-  const opensUnique = group.campaigns.reduce((s, c) => s + c.opens_unique, 0);
-  const bounces = group.campaigns.reduce((s, c) => s + c.bounces, 0);
-  const analyticsAvailable = group.campaigns.some((c) => c.analytics_available);
   const totalReceived = group.emails.length;
-  const hasData = sent > 0;
+  const automatedCount = group.emails.filter((e) => {
+    const cls = e.final_classification;
+    return cls === 'bounce' || cls === 'auto_reply' || cls === 'out_of_office';
+  }).length;
   const hasReplies = analyzedEmails.length > 0;
-  const automatedCount = group.emails.length - analyzedEmails.length;
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
@@ -2295,9 +2293,7 @@ function SentimentBox({ group }: { group: SentimentGroup }) {
             </div>
             <div className="mt-1.5 flex items-start gap-1.5">
               <span className="text-[11px] font-semibold text-gray-500 shrink-0 mt-0.5">Overall Reply Sentiment:</span>
-              {!hasData ? (
-                <span className="text-xs text-gray-400 italic">N/A</span>
-              ) : !hasReplies ? (
+              {!hasReplies ? (
                 <span className="text-xs text-gray-400 italic">N/A — no replies received in this period</span>
               ) : (
                 <span className="text-xs text-gray-700 leading-relaxed">{summary}</span>
@@ -2400,41 +2396,33 @@ function SentimentBox({ group }: { group: SentimentGroup }) {
           )}
         </div>
 
-        {/* Right: KPIs */}
+        {/* Right: date-filtered reply stats only */}
         <div>
-          <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-3">Campaign Metrics</div>
-          {!hasData ? (
-            <div className="text-xs text-gray-400 italic">No campaign activity in the selected period.</div>
+          <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-3">Reply Summary (Date Range)</div>
+          {totalReceived === 0 ? (
+            <div className="text-xs text-gray-400 italic">No replies received in this period.</div>
           ) : (
             <div className="space-y-4">
               <div>
-                <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Outreach Volume</div>
-                <SentKpi label="Emails Sent" value={fmt(sent)} sub="campaign lifetime total" />
+                <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Volume</div>
+                <SentKpi label="Total Replies" value={fmt(totalReceived)} />
+                <SentKpi label="Meaningful Replies" value={fmt(analyzedEmails.length)} sub={automatedCount > 0 ? `${automatedCount} automated excluded` : undefined} />
               </div>
               <div>
-                <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Engagement</div>
+                <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Quality</div>
                 <SentKpi
-                  label="Open Rate"
-                  value={analyticsAvailable && sent > 0 ? pct(opensUnique, sent) : 'N/A'}
-                  sub={analyticsAvailable ? `${fmt(opensUnique)} unique opens / ${fmt(sent)} sent` : undefined}
+                  label="Positive Replies"
+                  value={fmt(positiveEmails.length)}
+                  sub={analyzedEmails.length > 0 ? `${pct(positiveEmails.length, analyzedEmails.length)} of meaningful replies` : undefined}
                 />
                 <SentKpi
-                  label="Reply Rate"
-                  value={sent > 0 ? pct(totalReceived, sent) : 'N/A'}
-                  sub={`${fmt(totalReceived)} replies / ${fmt(sent)} sent`}
-                />
-              </div>
-              <div>
-                <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Reply Quality & Deliverability</div>
-                <SentKpi
-                  label="Positive Reply Rate"
-                  value={sent > 0 ? pct(positiveEmails.length, sent) : 'N/A'}
-                  sub={`${fmt(positiveEmails.length)} positive / ${fmt(sent)} sent`}
+                  label="Not Interested"
+                  value={fmt(themeCounts.not_interested + themeCounts.wrong_contact)}
+                  sub={analyzedEmails.length > 0 ? `${pct(themeCounts.not_interested + themeCounts.wrong_contact, analyzedEmails.length)} of meaningful replies` : undefined}
                 />
                 <SentKpi
-                  label="Bounce Rate"
-                  value={analyticsAvailable && sent > 0 ? pct(bounces, sent) : 'N/A'}
-                  sub={analyticsAvailable ? `${fmt(bounces)} bounces / ${fmt(sent)} sent` : undefined}
+                  label="Do Not Contact"
+                  value={themeCounts.do_not_contact > 0 ? fmt(themeCounts.do_not_contact) : '0'}
                 />
               </div>
             </div>
@@ -2473,7 +2461,7 @@ function SentimentTab({ campaigns, emails }: { campaigns: NormalizedCampaign[]; 
   }
 
   return (
-    <div className="space-y-4">
+    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
       {groups.map((g) => <SentimentBox key={g.key} group={g} />)}
     </div>
   );
