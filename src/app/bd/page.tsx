@@ -2158,32 +2158,22 @@ function DebugTab({ data }: { data: BDData | null }) {
 // ─── Sentiment Analysis Tab ───────────────────────────────────────────────────
 
 // Display theme config — merges raw classifications into meaningful business labels
-type DisplayThemeId = 'positive' | 'more_info' | 'wrong_contact' | 'not_interested' | 'do_not_contact' | 'neutral';
+type DisplayThemeId = 'positive' | 'more_info' | 'dnc_not_interested' | 'automated' | 'neutral';
 
 const DISPLAY_THEME_CONFIG: Record<DisplayThemeId, { label: string; color: string }> = {
-  positive:       { label: 'Interested / Wants to Connect',      color: '#10B981' },
-  more_info:      { label: 'Requested More Information',          color: '#0EA5E9' },
-  wrong_contact:  { label: 'Wrong Contact / Wrong Email',         color: '#F59E0B' },
-  not_interested: { label: 'Not Interested at This Time',         color: '#EF4444' },
-  do_not_contact: { label: 'Do Not Contact / Remove from List',   color: '#DC2626' },
-  neutral:        { label: 'Neutral / No Clear Signal',           color: '#6B7280' },
+  positive:           { label: 'Interested / Wants to Connect',  color: '#10B981' },
+  more_info:          { label: 'Requested More Information',      color: '#0EA5E9' },
+  dnc_not_interested: { label: 'DNC / Remove / Not Interested',  color: '#EF4444' },
+  automated:          { label: 'Automated (OOO / Auto-Reply)',    color: '#9CA3AF' },
+  neutral:            { label: 'Neutral / No Clear Signal',       color: '#6B7280' },
 };
-
-const WRONG_CONTACT_RE = /wrong\s+(person|number|email|contact|address)|not\s+the\s+(right|correct)\s+person|incorrect\s+(email|contact)|you\s+have\s+the\s+wrong|don'?t\s+own|no\s+longer\s+own|sold\s+(the\s+)?(business|property|it)|already\s+sold/i;
-
-// Catches remove/unsubscribe intent even when Instantly overrides final_classification to not_interested
-const DNC_BODY_RE = /\bremove( .{0,80})? from (your |the )?(list|email list|mailing list|marketing|database|emails?)\b|\bremoved from (your |the )?(list|email list|mailing list|marketing|database|emails?)\b|\bto be removed\b|\b(contact|email) (info|information|address).{0,50}\bremov|\bunsubscribe\b|\bopt.?out\b|\bplease (remove|unsubscribe)\b|stop (emailing|contacting|sending)|don'?t (contact|email|reach out to) (me|us) (again|anymore|further)/i;
 
 function getDisplayTheme(email: NormalizedEmail): DisplayThemeId {
   const cls = email.final_classification;
-  if (cls === 'unsubscribe') return 'do_not_contact';
   if (cls === 'positive_interested' || cls === 'meeting_requested' || cls === 'referral_given') return 'positive';
   if (cls === 'more_info_requested') return 'more_info';
-  if (cls === 'not_interested' || cls === 'negative_complaint') {
-    if (WRONG_CONTACT_RE.test(email.body_text || '')) return 'wrong_contact';
-    if (DNC_BODY_RE.test(email.body_text || '')) return 'do_not_contact';
-    return 'not_interested';
-  }
+  if (cls === 'not_interested' || cls === 'negative_complaint' || cls === 'unsubscribe') return 'dnc_not_interested';
+  if (cls === 'out_of_office' || cls === 'auto_reply') return 'automated';
   return 'neutral';
 }
 
@@ -2191,9 +2181,8 @@ function generateSentimentSummary(themeCounts: Record<DisplayThemeId, number>, t
   if (total === 0) return 'N/A';
   if (total < 3) return 'Insufficient reply volume to draw a reliable sentiment conclusion.';
   const pos = themeCounts.positive ?? 0;
-  const neg = (themeCounts.not_interested ?? 0) + (themeCounts.do_not_contact ?? 0);
+  const neg = themeCounts.dnc_not_interested ?? 0;
   const info = themeCounts.more_info ?? 0;
-  const wrong = themeCounts.wrong_contact ?? 0;
   const neutral = themeCounts.neutral ?? 0;
   const posPct = pos / total;
   const negPct = neg / total;
@@ -2202,10 +2191,7 @@ function generateSentimentSummary(themeCounts: Record<DisplayThemeId, number>, t
     if (info >= pos * 0.4) return 'Replies were predominantly positive, with most contacts requesting additional information about the opportunity.';
     return 'Replies were predominantly positive, reflecting strong engagement and interest from contacts reached.';
   }
-  if (negPct >= 0.6) {
-    if (wrong >= neg * 0.4) return 'Replies were primarily negative, with a significant share of wrong-contact or wrong-email responses.';
-    return 'Replies were primarily negative, with most contacts indicating they are not interested at this time.';
-  }
+  if (negPct >= 0.6) return 'Replies were primarily negative, with most contacts indicating they are not interested or requesting removal.';
   if (neutralPct >= 0.5) return 'Replies were largely neutral or ambiguous, with limited clear signals of interest or disinterest.';
   if (posPct > negPct && posPct > neutralPct) {
     if (info + pos > total * 0.4) return 'Replies were mixed with a positive lean, with interest concentrated around information requests and follow-up conversations.';
@@ -2239,12 +2225,9 @@ function SentKpi({ label, value, sub }: { label: string; value: string; sub?: st
 function SentimentBox({ group }: { group: SentimentGroup }) {
   const [expandedTheme, setExpandedTheme] = useState<DisplayThemeId | null>(null);
 
-  // Include unsubscribe in analysis as "do_not_contact"
+  // Exclude only hard bounces; OOO and auto-reply are shown under the Automated theme
   const analyzedEmails = useMemo(
-    () => group.emails.filter((e) => {
-      const cls = e.final_classification;
-      return cls !== 'bounce' && cls !== 'auto_reply' && cls !== 'out_of_office';
-    }),
+    () => group.emails.filter((e) => e.final_classification !== 'bounce'),
     [group.emails]
   );
 
@@ -2277,10 +2260,7 @@ function SentimentBox({ group }: { group: SentimentGroup }) {
 
   const summary = useMemo(() => generateSentimentSummary(themeCounts, analyzedEmails.length), [themeCounts, analyzedEmails.length]);
 
-  const automatedCount = group.emails.filter((e) => {
-    const cls = e.final_classification;
-    return cls === 'bounce' || cls === 'auto_reply' || cls === 'out_of_office';
-  }).length;
+  const bounceCount = group.emails.filter((e) => e.final_classification === 'bounce').length;
   const hasReplies = analyzedEmails.length > 0;
   const otherCount = topThemes.slice(5).reduce((s, t) => s + t.count, 0);
 
@@ -2407,7 +2387,7 @@ function SentimentBox({ group }: { group: SentimentGroup }) {
 
             <div className="text-[10px] text-gray-400 pt-1">
               {analyzedEmails.length} repl{analyzedEmails.length !== 1 ? 'ies' : 'y'} analyzed
-              {automatedCount > 0 && ` · ${automatedCount} automated excluded`}
+              {bounceCount > 0 && ` · ${bounceCount} bounce${bounceCount !== 1 ? 's' : ''} excluded`}
               {' · '}click any row to see replies
             </div>
           </div>
