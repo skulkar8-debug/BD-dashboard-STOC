@@ -2245,6 +2245,7 @@ function SentKpi({ label, value, sub }: { label: string; value: string; sub?: st
 
 function SentimentBox({ group }: { group: SentimentGroup }) {
   const [expandedTheme, setExpandedTheme] = useState<DisplayThemeId | null>(null);
+  const [showCampaigns, setShowCampaigns] = useState(false);
 
   // Exclude only hard bounces; OOO and auto-reply are shown under the Automated theme
   const analyzedEmails = useMemo(
@@ -2306,26 +2307,43 @@ function SentimentBox({ group }: { group: SentimentGroup }) {
               <span className="text-gray-300">|</span>
               <span className="text-sm font-bold text-gray-800">{group.sector || 'Other / Unmapped'}</span>
             </div>
-            <div className="mt-1.5 flex items-start gap-1.5">
-              <span className="text-[11px] font-semibold text-gray-500 shrink-0 mt-0.5">Overall Reply Sentiment:</span>
+            {/* Campaign dropdown toggle */}
+            <button
+              type="button"
+              onClick={() => setShowCampaigns((v) => !v)}
+              className="mt-1 flex items-center gap-1 text-[11px] text-gray-400 hover:text-blue-500 transition-colors"
+            >
+              <ChevronDown className={`h-3 w-3 transition-transform ${showCampaigns ? 'rotate-180' : ''}`} />
+              {group.campaigns.length} campaign{group.campaigns.length !== 1 ? 's' : ''}
+            </button>
+            {showCampaigns && (
+              <div className="mt-1.5 mb-0.5 border border-gray-200 rounded-lg overflow-hidden divide-y divide-gray-100 bg-white shadow-sm">
+                {group.campaigns.map((c) => (
+                  <div key={c.campaign_id} className="flex items-center justify-between gap-2 px-3 py-1.5">
+                    <span className="text-[11px] text-gray-700 truncate">{c.campaign_name}</span>
+                    <span className={`text-[10px] shrink-0 font-medium px-1.5 py-0.5 rounded-full ${
+                      c.campaign_status === 'Active' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'
+                    }`}>{c.campaign_status}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="mt-1.5">
               {!hasReplies ? (
-                <span className="text-xs text-gray-400 italic">N/A — no replies received in this period</span>
+                <span className="text-xs text-gray-400 italic">No replies received in this period</span>
               ) : (
                 <span className="text-xs text-gray-700 leading-relaxed">{summary}</span>
               )}
             </div>
           </div>
-          <div className="text-right shrink-0 space-y-0.5">
-            <div className="text-[11px] text-gray-400">{group.campaigns.length} campaign{group.campaigns.length !== 1 ? 's' : ''}</div>
-            {hasReplies && (
-              <div className="flex items-center justify-end gap-2">
-                <span className="text-[11px] text-gray-500 tabular-nums">{analyzedEmails.length} replies</span>
-                <span className="text-xs font-bold tabular-nums text-emerald-600">
-                  {pct(themeCounts.positive ?? 0, analyzedEmails.length)} positive
-                </span>
+          {hasReplies && (
+            <div className="text-right shrink-0 space-y-0.5">
+              <div className="text-[11px] text-gray-500 tabular-nums">{analyzedEmails.length} replies</div>
+              <div className="text-xs font-bold tabular-nums text-emerald-600">
+                {pct(themeCounts.positive ?? 0, analyzedEmails.length)} positive
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
 
