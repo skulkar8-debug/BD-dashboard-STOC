@@ -2307,27 +2307,39 @@ function SentimentBox({ group }: { group: SentimentGroup }) {
               <span className="text-gray-300">|</span>
               <span className="text-sm font-bold text-gray-800">{group.sector || 'Other / Unmapped'}</span>
             </div>
-            {/* Campaign dropdown toggle */}
-            <button
-              type="button"
-              onClick={() => setShowCampaigns((v) => !v)}
-              className="mt-1 flex items-center gap-1 text-[11px] text-gray-400 hover:text-blue-500 transition-colors"
-            >
-              <ChevronDown className={`h-3 w-3 transition-transform ${showCampaigns ? 'rotate-180' : ''}`} />
-              {group.campaigns.length} campaign{group.campaigns.length !== 1 ? 's' : ''}
-            </button>
-            {showCampaigns && (
-              <div className="mt-1.5 mb-0.5 border border-gray-200 rounded-lg overflow-hidden divide-y divide-gray-100 bg-white shadow-sm">
-                {group.campaigns.map((c) => (
-                  <div key={c.campaign_id} className="flex items-center justify-between gap-2 px-3 py-1.5">
-                    <span className="text-[11px] text-gray-700 truncate">{c.campaign_name}</span>
-                    <span className={`text-[10px] shrink-0 font-medium px-1.5 py-0.5 rounded-full ${
-                      c.campaign_status === 'Active' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'
-                    }`}>{c.campaign_status}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+            {/* Active campaign dropdown toggle */}
+            {(() => {
+              const active = group.campaigns.filter((c) => c.campaign_status === 'Active');
+              const activeSent = active.reduce((s, c) => s + c.sent, 0);
+              return (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowCampaigns((v) => !v)}
+                    className="mt-1 flex items-center gap-1 text-[11px] text-gray-400 hover:text-blue-500 transition-colors"
+                  >
+                    <ChevronDown className={`h-3 w-3 transition-transform ${showCampaigns ? 'rotate-180' : ''}`} />
+                    {active.length} active campaign{active.length !== 1 ? 's' : ''}
+                    {active.length > 0 && (
+                      <span className="text-gray-300 ml-1">· {fmt(activeSent)} sent (all-time)</span>
+                    )}
+                  </button>
+                  {showCampaigns && active.length > 0 && (
+                    <div className="mt-1.5 mb-0.5 border border-gray-200 rounded-lg overflow-hidden divide-y divide-gray-100 bg-white shadow-sm">
+                      {active.map((c) => (
+                        <div key={c.campaign_id} className="flex items-center justify-between gap-2 px-3 py-1.5">
+                          <span className="text-[11px] text-gray-700 truncate">{c.campaign_name}</span>
+                          <span className="text-[10px] text-gray-400 shrink-0 tabular-nums">{fmt(c.sent)} sent †</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {showCampaigns && active.length === 0 && (
+                    <div className="mt-1.5 text-[11px] text-gray-400 italic">No active campaigns</div>
+                  )}
+                </>
+              );
+            })()}
             <div className="mt-1.5">
               {!hasReplies ? (
                 <span className="text-xs text-gray-400 italic">No replies received in this period</span>
