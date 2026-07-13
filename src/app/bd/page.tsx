@@ -2434,6 +2434,8 @@ function SentimentBox({ group }: { group: SentimentGroup }) {
 }
 
 function SentimentTab({ campaigns, emails }: { campaigns: NormalizedCampaign[]; emails: NormalizedEmail[] }) {
+  const [onlyWithData, setOnlyWithData] = useState(true);
+
   const groups = useMemo<SentimentGroup[]>(() => {
     const map = new Map<string, SentimentGroup>();
     campaigns.forEach((c) => {
@@ -2452,6 +2454,13 @@ function SentimentTab({ campaigns, emails }: { campaigns: NormalizedCampaign[]; 
     );
   }, [campaigns, emails]);
 
+  const visibleGroups = useMemo(
+    () => onlyWithData ? groups.filter((g) => g.emails.length > 0) : groups,
+    [groups, onlyWithData]
+  );
+
+  const hiddenCount = groups.length - visibleGroups.length;
+
   if (groups.length === 0) {
     return (
       <div className="text-center py-20 text-gray-400 text-sm">
@@ -2461,8 +2470,39 @@ function SentimentTab({ campaigns, emails }: { campaigns: NormalizedCampaign[]; 
   }
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-      {groups.map((g) => <SentimentBox key={g.key} group={g} />)}
+    <div className="space-y-4">
+      {/* Sticky toolbar */}
+      <div className="sticky top-0 z-10 bg-white border border-gray-200 rounded-xl px-4 py-2.5 shadow-sm flex items-center justify-between gap-4">
+        <span className="text-xs text-gray-500">
+          Showing <strong>{visibleGroups.length}</strong> of <strong>{groups.length}</strong> org/sector combinations
+          {hiddenCount > 0 && <span className="text-gray-400"> · {hiddenCount} hidden (no replies)</span>}
+        </span>
+        <button
+          type="button"
+          onClick={() => setOnlyWithData((v) => !v)}
+          className={`flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors ${
+            onlyWithData
+              ? 'bg-blue-50 border-blue-200 text-blue-700'
+              : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'
+          }`}
+        >
+          <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${onlyWithData ? 'bg-blue-500 border-blue-500' : 'border-gray-300'}`}>
+            {onlyWithData && <Check className="w-2.5 h-2.5 text-white" />}
+          </span>
+          Only show sectors with replies
+        </button>
+      </div>
+
+      {visibleGroups.length === 0 ? (
+        <div className="text-center py-16 text-gray-400 text-sm">
+          No replies received in this period.{' '}
+          <button onClick={() => setOnlyWithData(false)} className="text-blue-500 underline">Show all sectors</button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          {visibleGroups.map((g) => <SentimentBox key={g.key} group={g} />)}
+        </div>
+      )}
     </div>
   );
 }
