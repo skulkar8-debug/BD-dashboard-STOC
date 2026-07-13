@@ -2171,6 +2171,9 @@ const DISPLAY_THEME_CONFIG: Record<DisplayThemeId, { label: string; color: strin
 
 const WRONG_CONTACT_RE = /wrong\s+(person|number|email|contact|address)|not\s+the\s+(right|correct)\s+person|incorrect\s+(email|contact)|you\s+have\s+the\s+wrong|don'?t\s+own|no\s+longer\s+own|sold\s+(the\s+)?(business|property|it)|already\s+sold/i;
 
+// Catches remove/unsubscribe intent even when Instantly overrides final_classification to not_interested
+const DNC_BODY_RE = /\bremove( .{0,80})? from (your |the )?(list|email list|mailing list|marketing|database|emails?)\b|\bremoved from (your |the )?(list|email list|mailing list|marketing|database|emails?)\b|\bto be removed\b|\b(contact|email) (info|information|address).{0,50}\bremov|\bunsubscribe\b|\bopt.?out\b|\bplease (remove|unsubscribe)\b|stop (emailing|contacting|sending)|don'?t (contact|email|reach out to) (me|us) (again|anymore|further)/i;
+
 function getDisplayTheme(email: NormalizedEmail): DisplayThemeId {
   const cls = email.final_classification;
   if (cls === 'unsubscribe') return 'do_not_contact';
@@ -2178,6 +2181,7 @@ function getDisplayTheme(email: NormalizedEmail): DisplayThemeId {
   if (cls === 'more_info_requested') return 'more_info';
   if (cls === 'not_interested' || cls === 'negative_complaint') {
     if (WRONG_CONTACT_RE.test(email.body_text || '')) return 'wrong_contact';
+    if (DNC_BODY_RE.test(email.body_text || '')) return 'do_not_contact';
     return 'not_interested';
   }
   return 'neutral';

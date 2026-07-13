@@ -112,6 +112,17 @@ const UNSUBSCRIBE_PATTERNS = [
   /^(no[.,]?\s+)?stop[.,]?\s*$/im,
   /^stop (this|it|now|please)[.,]?\s*$/im,
   /\bstop (this|it|now)\b/i,
+  // "Remove from list" (standalone) or "remove [X] from your list/marketing"
+  /\bremove( .{0,80})? from (your |the )?(list|email list|mailing list|marketing|database|emails?)\b/i,
+  // "removed from your list" (passive — "I'd like to be removed from your list")
+  /\bremoved from (your |the )?(list|email list|mailing list|marketing|database|emails?)\b/i,
+  // "contact info to be removed" / "to be removed"
+  /\bto be removed\b/i,
+  // "I'd like my contact info / email address removed"
+  /\b(contact|email) (info|information|address|details).{0,50}\bremov/i,
+  // "please don't contact me again" / "please don't reach out"
+  /please don'?t (contact|email|reach out|send)/i,
+  /don'?t (contact|email|reach out to) (me|us) (again|anymore|further)/i,
 ];
 
 // IMPORTANT: Check NOT interested BEFORE positive to avoid false positives
