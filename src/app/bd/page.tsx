@@ -13,14 +13,14 @@ import { exportCampaignsCsv, exportEmailsCsv, downloadCsv } from '@/lib/instantl
 import { SECTOR_OPTIONS } from '@/config/campaign-sector-map';
 import {
   Loader2, RefreshCw, AlertTriangle, Bug, BarChart3,
-  Calendar, Layers, MapPin, Table2, Inbox, TrendingUp, ChevronDown, ChevronRight, GitCompare, Link2, Check,
+  Calendar, Layers, MapPin, Table2, Inbox, TrendingUp, ChevronDown, ChevronRight, GitCompare, Link2, Check, MessageSquare,
 } from 'lucide-react';
 // Note: Calendar, TrendingUp kept for potential future use
 import Image from 'next/image';
 
 // ─── Deep-link URL sync ───────────────────────────────────────────────────────
 
-const VALID_TABS = ['overview','sectors','states','compare','inbox','analytics','debug'] as const;
+const VALID_TABS = ['overview','sectors','states','compare','inbox','analytics','sentiment','debug'] as const;
 type TabId = typeof VALID_TABS[number];
 
 type CompareMode = 'sector' | 'owner';
@@ -106,6 +106,7 @@ const TABS = [
   { id: 'compare',   label: 'Compare',    icon: <GitCompare className="h-3.5 w-3.5" /> },
   { id: 'inbox',     label: 'Inbox',      icon: <Inbox className="h-3.5 w-3.5" /> },
   { id: 'analytics', label: 'Analytics',  icon: <TrendingUp className="h-3.5 w-3.5" /> },
+  { id: 'sentiment', label: 'Sentiment',  icon: <MessageSquare className="h-3.5 w-3.5" /> },
   { id: 'debug',     label: 'Debug',      icon: <Bug className="h-3.5 w-3.5" /> },
 ] as const;
 
@@ -2154,6 +2155,276 @@ function DebugTab({ data }: { data: BDData | null }) {
   );
 }
 
+// ─── Sentiment Analysis Tab ───────────────────────────────────────────────────
+
+const MEANINGFUL_CLASSIFICATIONS = new Set([
+  'positive_interested', 'meeting_requested', 'referral_given',
+  'more_info_requested', 'not_interested', 'negative_complaint', 'neutral_needs_review',
+]);
+
+const SENTIMENT_THEME_LABELS: Record<string, string> = {
+  positive_interested:  'Positive Interest',
+  meeting_requested:    'Meeting or Call Requested',
+  referral_given:       'Referred to Another Contact',
+  more_info_requested:  'Requested More Information',
+  not_interested:       'Not Interested at This Time',
+  negative_complaint:   'Negative Feedback',
+  neutral_needs_review: 'Neutral or Ambiguous Reply',
+};
+
+const SENTIMENT_THEME_COLORS: Record<string, string> = {
+  positive_interested:  '#10B981',
+  meeting_requested:    '#059669',
+  referral_given:       '#0D9488',
+  more_info_requested:  '#0EA5E9',
+  not_interested:       '#EF4444',
+  negative_complaint:   '#DC2626',
+  neutral_needs_review: '#6B7280',
+};
+
+function generateSentimentSummary(themeCount: Record<string, number>, totalHuman: number): string {
+  if (totalHuman === 0) return 'N/A';
+  if (totalHuman < 3) return 'Insufficient reply volume to draw a reliable sentiment conclusion.';
+  const pos = (themeCount['positive_interested'] ?? 0) + (themeCount['meeting_requested'] ?? 0) +
+              (themeCount['more_info_requested'] ?? 0) + (themeCount['referral_given'] ?? 0);
+  const neg = (themeCount['not_interested'] ?? 0) + (themeCount['negative_complaint'] ?? 0);
+  const neutral = themeCount['neutral_needs_review'] ?? 0;
+  const posPct = pos / totalHuman;
+  const negPct = neg / totalHuman;
+  const neutralPct = neutral / totalHuman;
+  const meetingCount = themeCount['meeting_requested'] ?? 0;
+  const infoCount = themeCount['more_info_requested'] ?? 0;
+  if (posPct >= 0.6) {
+    if (pos > 0 && meetingCount >= pos * 0.5) return 'Replies were predominantly positive, with most contacts requesting calls or meetings to continue the conversation.';
+    if (pos > 0 && infoCount >= pos * 0.4) return 'Replies were predominantly positive, with most contacts requesting additional information about the opportunity.';
+    return 'Replies were predominantly positive, reflecting strong engagement and interest from contacts reached.';
+  }
+  if (negPct >= 0.6) return 'Replies were primarily negative, with most contacts indicating they are not interested at this time.';
+  if (neutralPct >= 0.5) return 'Replies were largely neutral or ambiguous, with limited clear signals of interest or disinterest.';
+  if (posPct > negPct && posPct > neutralPct) {
+    if (pos > 0 && infoCount + meetingCount >= pos * 0.5) return 'Replies were mixed with a positive lean, with interest concentrated around information requests and follow-up conversations.';
+    return 'Replies were mixed but leaning positive, with a notable share of contacts expressing openness or interest.';
+  }
+  if (negPct > posPct && negPct > neutralPct) return 'Replies were mixed but leaning negative, with not-interested responses outpacing positive engagement.';
+  if (pos > 0 && neg > 0) return 'Replies were evenly split between positive signals and not-interested responses, with no single dominant sentiment.';
+  return 'Replies were distributed across multiple themes with no single dominant sentiment pattern.';
+}
+
+type SentimentGroup = {
+  key: string;
+  org_id: string;
+  org_label: string;
+  sector: string;
+  campaigns: NormalizedCampaign[];
+  emails: NormalizedEmail[];
+};
+
+function SentKpi({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="flex items-center justify-between gap-2 py-0.5">
+      <span className="text-xs text-gray-500 shrink-0">{label}</span>
+      <div className="text-right">
+        <span className="text-xs font-bold text-gray-800 tabular-nums">{value}</span>
+        {sub && <div className="text-[10px] text-gray-400 tabular-nums">{sub}</div>}
+      </div>
+    </div>
+  );
+}
+
+function SentimentBox({ group }: { group: SentimentGroup }) {
+  const humanEmails = useMemo(
+    () => group.emails.filter((e) => MEANINGFUL_CLASSIFICATIONS.has(e.final_classification)),
+    [group.emails]
+  );
+  const positiveEmails = useMemo(() => group.emails.filter((e) => e.is_positive), [group.emails]);
+
+  const themeCount = useMemo(() => {
+    const m: Record<string, number> = {};
+    humanEmails.forEach((e) => { m[e.final_classification] = (m[e.final_classification] ?? 0) + 1; });
+    return m;
+  }, [humanEmails]);
+
+  const topThemes = useMemo(
+    () => Object.entries(themeCount).sort((a, b) => b[1] - a[1]).slice(0, 5),
+    [themeCount]
+  );
+
+  const summary = useMemo(() => generateSentimentSummary(themeCount, humanEmails.length), [themeCount, humanEmails.length]);
+
+  const sent = group.campaigns.reduce((s, c) => s + c.sent, 0);
+  const opensUnique = group.campaigns.reduce((s, c) => s + c.opens_unique, 0);
+  const bounces = group.campaigns.reduce((s, c) => s + c.bounces, 0);
+  const analyticsAvailable = group.campaigns.some((c) => c.analytics_available);
+  const totalReceived = group.emails.length;
+  const hasData = sent > 0;
+  const hasReplies = humanEmails.length > 0;
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+      {/* Header */}
+      <div className="px-5 py-3.5 border-b border-gray-100 bg-gray-50">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-semibold text-blue-600 uppercase tracking-wide">{group.org_label}</span>
+              <span className="text-gray-300">|</span>
+              <span className="text-sm font-bold text-gray-800">{group.sector || 'Other / Unmapped'}</span>
+            </div>
+            <div className="mt-1.5 flex items-start gap-1.5">
+              <span className="text-[11px] font-semibold text-gray-500 shrink-0 mt-0.5">Overall Reply Sentiment:</span>
+              {!hasData ? (
+                <span className="text-xs text-gray-400 italic">N/A</span>
+              ) : !hasReplies ? (
+                <span className="text-xs text-gray-400 italic">N/A — no replies received in this period</span>
+              ) : (
+                <span className="text-xs text-gray-700 leading-relaxed">{summary}</span>
+              )}
+            </div>
+          </div>
+          <div className="text-right shrink-0 text-[11px] text-gray-400">
+            {group.campaigns.length} campaign{group.campaigns.length !== 1 ? 's' : ''}
+          </div>
+        </div>
+      </div>
+
+      <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-5">
+        {/* Left: Top Reply Sentiments */}
+        <div>
+          <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-3">Top Reply Sentiments</div>
+          {!hasReplies ? (
+            <div className="space-y-2.5">
+              {[1,2,3,4,5].map((i) => (
+                <div key={i} className="flex items-center gap-2.5">
+                  <span className="w-4 text-xs font-bold text-gray-300 shrink-0">{i}.</span>
+                  <span className="text-xs text-gray-300 italic">N/A</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {Array.from({ length: 5 }, (_, i) => {
+                const entry = topThemes[i];
+                if (!entry) {
+                  return (
+                    <div key={i} className="flex items-center gap-2.5">
+                      <span className="w-4 text-xs font-bold text-gray-300 shrink-0">{i + 1}.</span>
+                      <span className="text-xs text-gray-300 italic">N/A</span>
+                    </div>
+                  );
+                }
+                const [cls, count] = entry;
+                const label = SENTIMENT_THEME_LABELS[cls] ?? cls;
+                const color = SENTIMENT_THEME_COLORS[cls] ?? '#6B7280';
+                const pcnt = (count / humanEmails.length * 100).toFixed(1);
+                const barPct = topThemes[0] ? (count / topThemes[0][1]) * 100 : 0;
+                return (
+                  <div key={cls} className="flex items-center gap-2.5">
+                    <span className="w-4 text-xs font-bold text-gray-400 shrink-0">{i + 1}.</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="text-xs font-medium text-gray-700 truncate">{label}</span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className="text-xs font-semibold tabular-nums text-gray-700">{count}</span>
+                          <span className="text-[10px] text-gray-400 w-11 text-right tabular-nums">{pcnt}%</span>
+                        </div>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                        <div className="h-full rounded-full transition-all" style={{ width: `${barPct}%`, backgroundColor: color }} />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="text-[10px] text-gray-400 pt-1">
+                Based on {humanEmails.length} meaningful repl{humanEmails.length !== 1 ? 'ies' : 'y'}
+                {group.emails.length > humanEmails.length && ` · ${group.emails.length - humanEmails.length} automated excluded`}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Right: KPIs */}
+        <div>
+          <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-3">Campaign Metrics</div>
+          {!hasData ? (
+            <div className="text-xs text-gray-400 italic">No campaign activity in the selected period.</div>
+          ) : (
+            <div className="space-y-4">
+              {/* Outreach Volume */}
+              <div>
+                <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Outreach Volume</div>
+                <SentKpi label="Emails Sent" value={fmt(sent)} sub="campaign lifetime total" />
+              </div>
+              {/* Engagement */}
+              <div>
+                <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Engagement</div>
+                <SentKpi
+                  label="Open Rate"
+                  value={analyticsAvailable && sent > 0 ? pct(opensUnique, sent) : 'N/A'}
+                  sub={analyticsAvailable ? `${fmt(opensUnique)} unique opens / ${fmt(sent)} sent` : undefined}
+                />
+                <SentKpi
+                  label="Reply Rate"
+                  value={sent > 0 ? pct(totalReceived, sent) : 'N/A'}
+                  sub={`${fmt(totalReceived)} replies / ${fmt(sent)} sent`}
+                />
+              </div>
+              {/* Reply Quality */}
+              <div>
+                <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Reply Quality & Deliverability</div>
+                <SentKpi
+                  label="Positive Reply Rate"
+                  value={sent > 0 ? pct(positiveEmails.length, sent) : 'N/A'}
+                  sub={`${fmt(positiveEmails.length)} positive / ${fmt(sent)} sent`}
+                />
+                <SentKpi
+                  label="Bounce Rate"
+                  value={analyticsAvailable && sent > 0 ? pct(bounces, sent) : 'N/A'}
+                  sub={analyticsAvailable ? `${fmt(bounces)} bounces / ${fmt(sent)} sent` : undefined}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SentimentTab({ campaigns, emails }: { campaigns: NormalizedCampaign[]; emails: NormalizedEmail[] }) {
+  const groups = useMemo<SentimentGroup[]>(() => {
+    const map = new Map<string, SentimentGroup>();
+    campaigns.forEach((c) => {
+      const key = `${c.org_id}::${c.sector}`;
+      if (!map.has(key)) {
+        map.set(key, { key, org_id: c.org_id, org_label: c.org_label, sector: c.sector, campaigns: [], emails: [] });
+      }
+      map.get(key)!.campaigns.push(c);
+    });
+    emails.forEach((e) => {
+      const key = `${e.org_id}::${e.sector}`;
+      if (map.has(key)) map.get(key)!.emails.push(e);
+    });
+    return [...map.values()].sort((a, b) =>
+      a.org_label.localeCompare(b.org_label) || a.sector.localeCompare(b.sector)
+    );
+  }, [campaigns, emails]);
+
+  if (groups.length === 0) {
+    return (
+      <div className="text-center py-20 text-gray-400 text-sm">
+        No campaign data available for the selected filters.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {groups.map((g) => <SentimentBox key={g.key} group={g} />)}
+    </div>
+  );
+}
+
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
 export default function BDDashboard() {
@@ -2293,6 +2564,7 @@ export default function BDDashboard() {
             {tab === 'compare'   && <CompareTab filteredCampaigns={bd.compareCampaigns} filteredEmails={bd.compareEmails} sectorA={sectorA} setSectorA={setSectorA} sectorB={sectorB} setSectorB={setSectorB} compareMode={compareMode} setCompareMode={setCompareMode} ownerA={ownerA} setOwnerA={setOwnerA} ownerB={ownerB} setOwnerB={setOwnerB} />}
             {tab === 'inbox'     && <InboxTab emails={bd.filteredEmails} />}
             {tab === 'analytics' && <AnalyticsTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} campaignStats={bd.campaignStats} />}
+            {tab === 'sentiment' && <SentimentTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} />}
             {tab === 'debug'     && <DebugTab data={bd.data} />}
           </>
         )}
