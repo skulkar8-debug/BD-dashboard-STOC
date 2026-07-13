@@ -255,20 +255,16 @@ function OverviewTab({
   isFiltered: boolean;
   campaignStats: ReturnType<typeof useBDData>['campaignStats'];
 }) {
-  // positive emails = human replies with positive classification (same as stats.actionable)
-  const positive = emails.filter((e) => e.is_positive);
   const noAnalytics = !analyticsAvailable;
 
-  // Best performers — all counts derived from filtered emails only
+  // ── Derived data ──────────────────────────────────────────────────────────
   const bySector = useMemo(() => {
     const m = new Map<string, { replies: number; positive: number; sent: number }>();
-    // sent is lifetime per campaign (for context only, not used for rates)
     campaigns.forEach((c) => {
       const cur = m.get(c.sector) ?? { replies: 0, positive: 0, sent: 0 };
       cur.sent += c.sent;
       m.set(c.sector, cur);
     });
-    // replies and positives come from filtered email records
     emails.forEach((e) => {
       const cur = m.get(e.sector);
       if (!cur) return;
@@ -290,202 +286,328 @@ function OverviewTab({
     return m;
   }, [emails]);
 
-  // Use filtered-email-derived positive counts (not pre-computed c.positive_reply_count)
-  const bestCampaign = [...campaigns]
-    .map((c) => ({ c, pos: campaignStats.get(c.campaign_id)?.positive ?? 0 }))
-    .filter(({ pos }) => pos > 0)
-    .sort((a, b) => b.pos - a.pos)[0]?.c ?? null;
-  const bestCampaignPos = bestCampaign ? (campaignStats.get(bestCampaign.campaign_id)?.positive ?? 0) : 0;
+  const sectorRows = [...bySector.entries()]
+    .filter(([sector]) => sector && sector !== 'Unmapped')
+    .map(([sector, v]) => ({ sector, ...v, rate: v.replies > 0 ? v.positive / v.replies : 0 }))
+    .sort((a, b) => b.rate - a.rate);
 
-  const bestState = [...byState.entries()]
-    .filter(([, v]) => v.replies >= 2)
-    .sort((a, b) => b[1].positive / Math.max(b[1].replies, 1) - a[1].positive / Math.max(a[1].replies, 1))[0];
+  const stateRows = [...byState.entries()]
+    .filter(([, v]) => v.replies >= 3)
+    .map(([state, v]) => ({ state, ...v, rate: v.replies > 0 ? v.positive / v.replies : 0 }))
+    .sort((a, b) => b.rate - a.rate);
 
-  const followUps = campaigns
+  // Health alerts
+  const highBounceCampaigns = campaigns
+    .filter((c) => c.bounce_rate > 5 && c.sent > 50)
+    .sort((a, b) => b.bounce_rate - a.bounce_rate)
+    .slice(0, 5);
+
+  const staleActiveCampaigns = useMemo(() => {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const cutoff = thirtyDaysAgo.toISOString();
+    return campaigns
+      .filter((c) => (c.campaign_status_num === 1 || c.campaign_status_num === 2) && c.sent > 0)
+      .filter((c) => {
+        const lastReply = emails
+          .filter((e) => e.campaign_id === c.campaign_id)
+          .map((e) => e.timestamp_email)
+          .sort()
+          .at(-1);
+        return !lastReply || lastReply < cutoff;
+      })
+      .slice(0, 5);
+  }, [campaigns, emails]);
+
+  const highUnsubCampaigns = campaigns
+    .filter((c) => c.unsubscribes > 0 && c.sent > 50)
+    .sort((a, b) => (b.unsubscribes / b.sent) - (a.unsubscribes / a.sent))
+    .slice(0, 3);
+
+  // Action queue — campaigns grouped by recommended_action
+  const pauseReview = campaigns
+    .filter((c) => c.recommended_action === 'Pause / Review' || c.recommended_action === 'Review')
+    .sort((a, b) => b.bounce_rate - a.bounce_rate)
+    .slice(0, 6);
+
+  const followUpCampaigns = campaigns
     .map((c) => ({ c, pos: campaignStats.get(c.campaign_id)?.positive ?? 0 }))
     .filter(({ pos }) => pos > 0)
     .sort((a, b) => b.pos - a.pos)
-    .slice(0, 5);
-  const toReview = campaigns.filter((c) => c.recommended_action === 'Pause / Review' || c.recommended_action === 'Review')
-    .sort((a, b) => b.sent - a.sent).slice(0, 5);
+    .slice(0, 6);
 
-  // Sector performance table — show all sectors (no cap)
-  const sectorRows = [...bySector.entries()]
-    .filter(([sector]) => sector && sector !== 'Unmapped')
-    .map(([sector, v]) => ({ sector, ...v }))
-    .sort((a, b) => b.positive - a.positive);
-
-  const stateRows = [...byState.entries()]
-    .map(([state, v]) => ({ state, ...v }))
-    .sort((a, b) => b.positive - a.positive)
-    .slice(0, 12);
-
-  // Recent positive replies
-  const recentPositive = [...positive]
+  const recentPositive = [...emails]
+    .filter((e) => e.is_positive)
     .sort((a, b) => b.timestamp_email.localeCompare(a.timestamp_email))
-    .slice(0, 5);
+    .slice(0, 4);
+
+  const hasAlerts = highBounceCampaigns.length > 0 || staleActiveCampaigns.length > 0 || highUnsubCampaigns.length > 0;
 
   return (
-    <div className="space-y-5">
-      {/* Analytics notice */}
-      {noAnalytics && (
-        <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-4 py-2 text-xs">
-          <AlertTriangle className="h-4 w-4 flex-shrink-0" />
-          Analytics unavailable — Sent/Open/Bounce metrics show 0. Reply and positive counts are from actual email data.
-        </div>
-      )}
-
-      {/* Row 1: KPI cards */}
-      <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
-        <div className="bg-white border border-gray-200 rounded-xl p-4 text-center shadow-sm">
-          <div className={`text-2xl font-bold tabular-nums ${noAnalytics ? 'text-gray-300' : 'text-gray-900'}`}>
-            {noAnalytics ? <span title="Analytics unavailable">—</span> : fmt(stats.sent)}
+    <div className="space-y-6">
+      {/* ── Section 1: At-a-Glance KPIs ──────────────────────────────────── */}
+      <div>
+        <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-2 px-0.5">At a Glance</div>
+        {noAnalytics && (
+          <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-3 py-1.5 text-xs mb-2">
+            <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+            Sent / Bounce metrics unavailable — analytics API returned no data.
           </div>
-          <div className="text-[11px] text-gray-500 mt-0.5">Sent — Only All-Time Data Available</div>
-          {noAnalytics && <div className="text-[10px] text-amber-500">analytics n/a</div>}
-        </div>
-        <div className="bg-white border border-gray-200 rounded-xl p-4 text-center shadow-sm">
-          <div className="text-2xl font-bold tabular-nums text-gray-900">{fmt(stats.replies)}</div>
-          <div className="text-[11px] text-gray-500 mt-0.5">Replies (Date-Filtered)</div>
-          <div className="text-[10px] text-gray-400">
-            {noAnalytics
-              ? 'filtered'
-              : <ScopedRate num={stats.replies} den={stats.sent} isFiltered={isFiltered} />}
+        )}
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
+          {/* Sent */}
+          <div className="bg-white border border-gray-200 rounded-xl p-4 text-center shadow-sm col-span-1">
+            <div className={`text-2xl font-bold tabular-nums ${noAnalytics ? 'text-gray-300' : 'text-gray-900'}`}>
+              {noAnalytics ? '—' : fmt(stats.sent)}
+            </div>
+            <div className="text-[10px] text-gray-500 mt-0.5 leading-tight">Emails Sent<br /><span className="text-gray-400">(all-time)</span></div>
           </div>
-        </div>
-        <div className="bg-white border border-l-4 border-emerald-400 rounded-xl p-4 text-center shadow-sm">
-          <div className="text-2xl font-bold tabular-nums text-emerald-600">{fmt(stats.actionable)}</div>
-          <div className="text-[11px] text-gray-500 mt-0.5">Actionable Replies</div>
-          <div className="text-[10px] text-gray-400" title="Actionable ÷ human replies (excludes OOO, bounce, auto, unsub)">
-            {pct(stats.actionable, stats.humanReplies)} of {fmt(stats.humanReplies)} human
+          {/* Replies */}
+          <div className="bg-white border border-gray-200 rounded-xl p-4 text-center shadow-sm">
+            <div className="text-2xl font-bold tabular-nums text-gray-900">{fmt(stats.replies)}</div>
+            <div className="text-[10px] text-gray-500 mt-0.5 leading-tight">Replies<br /><span className="text-gray-400">(date-filtered)</span></div>
           </div>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-xl p-4 text-center shadow-sm">
-          <div className={`text-2xl font-bold tabular-nums ${noAnalytics ? 'text-gray-300' : 'text-amber-600'}`}>
-            {noAnalytics ? '—' : fmt(stats.opps)}
+          {/* Positive replies */}
+          <div className="bg-white border border-l-4 border-emerald-400 rounded-xl p-4 text-center shadow-sm">
+            <div className="text-2xl font-bold tabular-nums text-emerald-600">{fmt(stats.actionable)}</div>
+            <div className="text-[10px] text-gray-500 mt-0.5 leading-tight">Positive<br /><span className="text-gray-400">(date-filtered)</span></div>
           </div>
-          <div className="text-[11px] text-gray-500 mt-0.5">Opportunities (All-Time)</div>
-          {!noAnalytics && <div className="text-[10px] text-gray-400">{pct(stats.opps, stats.sent)} of all-time sent</div>}
-        </div>
-        <div className="bg-white border border-gray-200 rounded-xl p-4 text-center shadow-sm">
-          <div className="text-2xl font-bold tabular-nums text-blue-600">{stats.activeCampaigns}</div>
-          <div className="text-[11px] text-gray-500 mt-0.5">Active</div>
-          <div className="text-[10px] text-gray-400">of {stats.totalCampaigns} campaigns</div>
-        </div>
-        <div className={`border rounded-xl p-4 text-center shadow-sm ${stats.needsAttention > 0 ? 'bg-red-50 border-red-200' : 'bg-white border-gray-200'}`}>
-          <div className={`text-2xl font-bold tabular-nums ${stats.needsAttention > 0 ? 'text-red-600' : 'text-gray-300'}`}>
-            {stats.needsAttention || '0'}
+          {/* Positive rate */}
+          <div className="bg-white border border-gray-200 rounded-xl p-4 text-center shadow-sm">
+            <div className="text-2xl font-bold tabular-nums text-emerald-700">
+              {stats.humanReplies > 0 ? `${Math.round((stats.actionable / stats.humanReplies) * 100)}%` : '—'}
+            </div>
+            <div className="text-[10px] text-gray-500 mt-0.5 leading-tight">Pos. Rate<br /><span className="text-gray-400">of human replies</span></div>
           </div>
-          <div className="text-[11px] text-gray-500 mt-0.5">Needs Attention</div>
-          <div className="text-[10px] text-gray-400">{stats.followUp} to follow up</div>
+          {/* Bounce rate */}
+          <div className={`border rounded-xl p-4 text-center shadow-sm ${!noAnalytics && stats.bounce_rate > 5 ? 'bg-red-50 border-red-300' : 'bg-white border-gray-200'}`}>
+            <div className={`text-2xl font-bold tabular-nums ${noAnalytics ? 'text-gray-300' : stats.bounce_rate > 5 ? 'text-red-600' : 'text-gray-900'}`}>
+              {noAnalytics ? '—' : `${stats.bounce_rate}%`}
+            </div>
+            <div className="text-[10px] text-gray-500 mt-0.5 leading-tight">Bounce Rate<br /><span className="text-gray-400">(all-time)</span></div>
+          </div>
+          {/* Active campaigns */}
+          <div className="bg-white border border-gray-200 rounded-xl p-4 text-center shadow-sm">
+            <div className="text-2xl font-bold tabular-nums text-blue-600">{stats.activeCampaigns}</div>
+            <div className="text-[10px] text-gray-500 mt-0.5 leading-tight">Active<br /><span className="text-gray-400">of {stats.totalCampaigns} campaigns</span></div>
+          </div>
         </div>
       </div>
 
-      {/* Row 2: Insight bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
-          <div className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wide mb-1">Best Campaign</div>
-          <div className="font-semibold text-gray-800 text-sm truncate" title={bestCampaign?.campaign_name}>{bestCampaign ? bestCampaign.campaign_name : '—'}</div>
-          {bestCampaign && <div className="text-xs text-gray-500 mt-0.5">{bestCampaignPos} positive · {bestCampaign.sector} · {bestCampaign.state}</div>}
-        </div>
-        <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
-          <div className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wide mb-1">Best State</div>
-          <div className="font-semibold text-gray-800 text-sm">{bestState ? bestState[0] : '—'}</div>
-          {bestState && <div className="text-xs text-gray-500 mt-0.5">{bestState[1].positive} positive · {pct(bestState[1].positive, bestState[1].replies)} rate</div>}
-        </div>
-        <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
-          <div className="text-[10px] font-semibold text-blue-600 uppercase tracking-wide mb-1">Follow Up ({followUps.length})</div>
-          {followUps.length > 0 ? (
-            <div className="space-y-0.5">
-              {followUps.slice(0, 3).map(({ c, pos }) => (
-                <div key={c.campaign_id} className="text-xs text-gray-700 truncate">
-                  <span className="text-emerald-600 font-semibold">{pos}</span> · {c.campaign_name}
-                </div>
-              ))}
-            </div>
-          ) : <div className="text-xs text-gray-400">None</div>}
-        </div>
-        <div className={`border rounded-xl p-3 ${toReview.length > 0 ? 'bg-red-50 border-red-100' : 'bg-gray-50 border-gray-100'}`}>
-          <div className={`text-[10px] font-semibold uppercase tracking-wide mb-1 ${toReview.length > 0 ? 'text-red-600' : 'text-gray-400'}`}>Review / Pause ({toReview.length})</div>
-          {toReview.length > 0 ? (
-            <div className="space-y-0.5">
-              {toReview.slice(0, 3).map((c) => (
-                <div key={c.campaign_id} className="text-xs text-gray-700 truncate">
-                  <span className="text-red-500 font-semibold">{c.bounce_rate > 5 ? `${c.bounce_rate}% bounce` : `${c.reply_rate}% reply`}</span> · {c.campaign_name}
-                </div>
-              ))}
-            </div>
-          ) : <div className="text-xs text-gray-400">All clear</div>}
-        </div>
-      </div>
-
-      {/* Row 3: Performance tables + recent positive replies */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        {/* Sector table */}
-        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50 text-xs font-semibold text-gray-600">Sector Performance</div>
-          <table className="w-full text-xs">
-            <thead><tr className="text-gray-400 text-[10px] uppercase">
-              <th className="text-left px-3 py-2">Sector</th>
-              <th className="text-right px-3 py-2">Replies</th>
-              <th className="text-right px-3 py-2">Positive</th>
-              <th className="text-right px-3 py-2">Rate</th>
-            </tr></thead>
-            <tbody>
-              {sectorRows.map((r) => (
-                <tr key={r.sector} className="border-t border-gray-50 hover:bg-gray-50">
-                  <td className="px-3 py-1.5 font-medium text-gray-700 max-w-[120px] truncate">{r.sector}</td>
-                  <td className="text-right px-3 py-1.5">{r.replies}</td>
-                  <td className="text-right px-3 py-1.5 text-emerald-600 font-semibold">{r.positive}</td>
-                  <td className="text-right px-3 py-1.5">{pct(r.positive, r.replies)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* State table */}
-        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50 text-xs font-semibold text-gray-600">State Performance</div>
-          <table className="w-full text-xs">
-            <thead><tr className="text-gray-400 text-[10px] uppercase">
-              <th className="text-left px-3 py-2">State</th>
-              <th className="text-right px-3 py-2">Replies</th>
-              <th className="text-right px-3 py-2">Positive</th>
-              <th className="text-right px-3 py-2">Rate</th>
-            </tr></thead>
-            <tbody>
-              {stateRows.map((r) => (
-                <tr key={r.state} className="border-t border-gray-50 hover:bg-gray-50">
-                  <td className="px-3 py-1.5 font-medium text-gray-700">{r.state}</td>
-                  <td className="text-right px-3 py-1.5">{r.replies}</td>
-                  <td className="text-right px-3 py-1.5 text-emerald-600 font-semibold">{r.positive}</td>
-                  <td className="text-right px-3 py-1.5">{pct(r.positive, r.replies)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Recent positive replies */}
-        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50 text-xs font-semibold text-gray-600">Recent Positive Replies</div>
-          <div className="divide-y divide-gray-50">
-            {recentPositive.length > 0 ? recentPositive.map((e) => (
-              <div key={e.id} className="px-3 py-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="text-xs font-medium text-gray-800 truncate">{e.from_name || e.from_email}</div>
-                    <div className="text-[10px] text-gray-400 truncate">{e.campaign_name} · {e.state}</div>
-                  </div>
-                  <div className="text-[10px] text-gray-400 flex-shrink-0">{new Date(e.timestamp_email).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div>
-                </div>
-                <div className="text-xs text-gray-600 mt-1 line-clamp-2">{e.content_preview || e.body_text.slice(0, 150)}</div>
-                <StatusBadge value={CLASSIFICATION_LABELS[e.final_classification]} />
+      {/* ── Section 2: Health Alerts ──────────────────────────────────────── */}
+      <div>
+        <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-2 px-0.5">Health Alerts</div>
+        {!hasAlerts ? (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 text-sm text-emerald-700 flex items-center gap-2">
+            <Check className="h-4 w-4 flex-shrink-0" /> All clear — no bounce issues, stale campaigns, or high unsubscribe rates detected.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {/* High bounce */}
+            <div className={`border rounded-xl overflow-hidden shadow-sm ${highBounceCampaigns.length > 0 ? 'border-red-200' : 'border-gray-100'}`}>
+              <div className={`px-3 py-2 text-xs font-semibold flex items-center gap-1.5 ${highBounceCampaigns.length > 0 ? 'bg-red-50 text-red-700' : 'bg-gray-50 text-gray-400'}`}>
+                <AlertTriangle className="h-3.5 w-3.5" />
+                High Bounce ({highBounceCampaigns.length})
               </div>
-            )) : (
-              <div className="px-3 py-6 text-center text-xs text-gray-400">No positive replies in current filter</div>
+              <div className="divide-y divide-gray-50 bg-white">
+                {highBounceCampaigns.length === 0 ? (
+                  <div className="px-3 py-2 text-xs text-gray-400">None</div>
+                ) : highBounceCampaigns.map((c) => (
+                  <div key={c.campaign_id} className="px-3 py-1.5 flex items-center justify-between gap-2">
+                    <span className="text-xs text-gray-700 truncate" title={c.campaign_name}>{c.campaign_name}</span>
+                    <span className="text-xs font-bold text-red-600 flex-shrink-0">{c.bounce_rate}%</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Stale active campaigns */}
+            <div className={`border rounded-xl overflow-hidden shadow-sm ${staleActiveCampaigns.length > 0 ? 'border-amber-200' : 'border-gray-100'}`}>
+              <div className={`px-3 py-2 text-xs font-semibold flex items-center gap-1.5 ${staleActiveCampaigns.length > 0 ? 'bg-amber-50 text-amber-700' : 'bg-gray-50 text-gray-400'}`}>
+                <AlertTriangle className="h-3.5 w-3.5" />
+                No Replies in 30d ({staleActiveCampaigns.length})
+              </div>
+              <div className="divide-y divide-gray-50 bg-white">
+                {staleActiveCampaigns.length === 0 ? (
+                  <div className="px-3 py-2 text-xs text-gray-400">None</div>
+                ) : staleActiveCampaigns.map((c) => (
+                  <div key={c.campaign_id} className="px-3 py-1.5 flex items-center justify-between gap-2">
+                    <span className="text-xs text-gray-700 truncate" title={c.campaign_name}>{c.campaign_name}</span>
+                    <span className="text-xs text-gray-400 flex-shrink-0">{fmt(c.sent)} sent</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* High unsubscribe */}
+            <div className={`border rounded-xl overflow-hidden shadow-sm ${highUnsubCampaigns.length > 0 ? 'border-orange-200' : 'border-gray-100'}`}>
+              <div className={`px-3 py-2 text-xs font-semibold flex items-center gap-1.5 ${highUnsubCampaigns.length > 0 ? 'bg-orange-50 text-orange-700' : 'bg-gray-50 text-gray-400'}`}>
+                <AlertTriangle className="h-3.5 w-3.5" />
+                High Unsubscribe ({highUnsubCampaigns.length})
+              </div>
+              <div className="divide-y divide-gray-50 bg-white">
+                {highUnsubCampaigns.length === 0 ? (
+                  <div className="px-3 py-2 text-xs text-gray-400">None</div>
+                ) : highUnsubCampaigns.map((c) => (
+                  <div key={c.campaign_id} className="px-3 py-1.5 flex items-center justify-between gap-2">
+                    <span className="text-xs text-gray-700 truncate" title={c.campaign_name}>{c.campaign_name}</span>
+                    <span className="text-xs font-bold text-orange-600 flex-shrink-0">{c.unsubscribes} unsub</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Section 3: Leaderboards ───────────────────────────────────────── */}
+      <div>
+        <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-2 px-0.5">Leaderboards — Positive Reply Rate</div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* By sector */}
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50 text-xs font-semibold text-gray-600 flex items-center justify-between">
+              <span>By Sector</span>
+              <span className="text-gray-400 font-normal text-[10px]">pos% of replies</span>
+            </div>
+            {sectorRows.length === 0 ? (
+              <div className="px-4 py-4 text-xs text-gray-400">No data</div>
+            ) : (
+              <table className="w-full text-xs">
+                <tbody>
+                  {sectorRows.map((r, i) => {
+                    const isTop = i < 3;
+                    const isBot = i >= sectorRows.length - 3 && sectorRows.length > 3;
+                    return (
+                      <tr key={r.sector} className="border-t border-gray-50 hover:bg-gray-50">
+                        <td className="px-3 py-1.5 w-6 text-center text-[10px] text-gray-400">
+                          {isTop ? <span className="text-emerald-500 font-bold">{i + 1}</span> : isBot ? <span className="text-red-400">{i + 1}</span> : <span>{i + 1}</span>}
+                        </td>
+                        <td className="px-2 py-1.5 font-medium text-gray-700 max-w-[130px] truncate">{r.sector}</td>
+                        <td className="text-right px-2 py-1.5 text-gray-400">{r.replies} repl.</td>
+                        <td className="text-right px-3 py-1.5 font-bold tabular-nums w-14">
+                          <span className={isTop && r.rate > 0 ? 'text-emerald-600' : isBot ? 'text-red-400' : 'text-gray-600'}>
+                            {r.replies > 0 ? `${Math.round(r.rate * 100)}%` : '—'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             )}
+          </div>
+
+          {/* By state */}
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50 text-xs font-semibold text-gray-600 flex items-center justify-between">
+              <span>By State</span>
+              <span className="text-gray-400 font-normal text-[10px]">min 3 replies</span>
+            </div>
+            {stateRows.length === 0 ? (
+              <div className="px-4 py-4 text-xs text-gray-400">Not enough data (need 3+ replies per state)</div>
+            ) : (
+              <table className="w-full text-xs">
+                <tbody>
+                  {stateRows.map((r, i) => {
+                    const isTop = i < 3;
+                    const isBot = i >= stateRows.length - 3 && stateRows.length > 3;
+                    return (
+                      <tr key={r.state} className="border-t border-gray-50 hover:bg-gray-50">
+                        <td className="px-3 py-1.5 w-6 text-center text-[10px]">
+                          {isTop ? <span className="text-emerald-500 font-bold">{i + 1}</span> : isBot ? <span className="text-red-400">{i + 1}</span> : <span className="text-gray-400">{i + 1}</span>}
+                        </td>
+                        <td className="px-2 py-1.5 font-medium text-gray-700">{r.state}</td>
+                        <td className="text-right px-2 py-1.5 text-gray-400">{r.replies} repl.</td>
+                        <td className="text-right px-3 py-1.5 font-bold tabular-nums w-14">
+                          <span className={isTop && r.rate > 0 ? 'text-emerald-600' : isBot ? 'text-red-400' : 'text-gray-600'}>
+                            {Math.round(r.rate * 100)}%
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Section 4: Action Queue ───────────────────────────────────────── */}
+      <div>
+        <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-2 px-0.5">Action Queue</div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Follow up — campaigns with positive replies */}
+          <div className="bg-white border border-emerald-200 rounded-xl shadow-sm overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-emerald-100 bg-emerald-50 text-xs font-semibold text-emerald-700 flex items-center gap-1.5">
+              <Check className="h-3.5 w-3.5" />
+              Follow Up — Active Positive Replies ({followUpCampaigns.length})
+            </div>
+            {followUpCampaigns.length === 0 ? (
+              <div className="px-4 py-3 text-xs text-gray-400">No campaigns with positive replies in current filter.</div>
+            ) : (
+              <div className="divide-y divide-gray-50">
+                {followUpCampaigns.map(({ c, pos }) => (
+                  <div key={c.campaign_id} className="px-3 py-2 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-xs font-medium text-gray-800 truncate" title={c.campaign_name}>{c.campaign_name}</div>
+                      <div className="text-[10px] text-gray-400">{c.sector} · {c.state} · {c.org_label}</div>
+                    </div>
+                    <div className="flex-shrink-0 text-right">
+                      <div className="text-sm font-bold text-emerald-600">{pos}</div>
+                      <div className="text-[10px] text-gray-400">positive</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Pause / review + recent positives */}
+          <div className="space-y-4">
+            <div className={`border rounded-xl shadow-sm overflow-hidden ${pauseReview.length > 0 ? 'border-red-200' : 'border-gray-200'}`}>
+              <div className={`px-4 py-2.5 border-b text-xs font-semibold flex items-center gap-1.5 ${pauseReview.length > 0 ? 'bg-red-50 border-red-100 text-red-700' : 'bg-gray-50 border-gray-100 text-gray-400'}`}>
+                <AlertTriangle className="h-3.5 w-3.5" />
+                Pause / Review ({pauseReview.length})
+              </div>
+              {pauseReview.length === 0 ? (
+                <div className="px-4 py-3 bg-white text-xs text-gray-400">No campaigns flagged for review.</div>
+              ) : (
+                <div className="divide-y divide-gray-50 bg-white">
+                  {pauseReview.map((c) => (
+                    <div key={c.campaign_id} className="px-3 py-1.5 flex items-center justify-between gap-2">
+                      <span className="text-xs text-gray-700 truncate" title={c.campaign_name}>{c.campaign_name}</span>
+                      <span className="text-xs font-bold text-red-600 flex-shrink-0">
+                        {c.bounce_rate > 5 ? `${c.bounce_rate}% bnc` : `${c.reply_rate}% rpl`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50 text-xs font-semibold text-gray-600">Recent Positive Replies</div>
+              {recentPositive.length === 0 ? (
+                <div className="px-4 py-3 text-xs text-gray-400">None in current filter.</div>
+              ) : (
+                <div className="divide-y divide-gray-50">
+                  {recentPositive.map((e) => (
+                    <div key={e.id} className="px-3 py-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="text-xs font-medium text-gray-800 truncate">{e.from_name || e.from_email}</div>
+                          <div className="text-[10px] text-gray-400 truncate">{e.campaign_name} · {e.state}</div>
+                        </div>
+                        <div className="text-[10px] text-gray-400 flex-shrink-0">{new Date(e.timestamp_email).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div>
+                      </div>
+                      <div className="text-xs text-gray-600 mt-0.5 line-clamp-2">{e.content_preview || e.body_text.slice(0, 120)}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>

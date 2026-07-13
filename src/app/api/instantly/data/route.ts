@@ -3,6 +3,8 @@ import { getEnabledOrgs } from '@/lib/instantly/orgs';
 import { fetchCampaigns, fetchAllCampaignAnalytics, fetchReceivedEmails } from '@/lib/instantly/client';
 import { normalizeCampaign, normalizeEmail, resolveMapping } from '@/lib/instantly/normalize';
 import type { BDData, NormalizedEmail, OrgData, OrgConfig, InstantlyAnalytics } from '@/lib/instantly/types';
+import { appendSnapshot } from '@/lib/instantly/snapshots';
+import type { DailySnapshot } from '@/lib/instantly/snapshots';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300; // Vercel Pro: allow up to 5 min for full email fetch
@@ -141,6 +143,26 @@ export async function GET(req: Request) {
 
   cacheData = data;
   cacheExpires = now + CACHE_TTL;
+
+  // Save daily snapshot (fire-and-forget — never block the response)
+  void (async () => {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const snap: DailySnapshot = {
+        date: today,
+        by_org: Object.fromEntries(
+          orgData.map((o) => [
+            o.org.id,
+            {
+              sent: o.campaigns.reduce((s, c) => s + c.sent, 0),
+              campaigns: Object.fromEntries(o.campaigns.map((c) => [c.campaign_id, c.sent])),
+            },
+          ])
+        ),
+      };
+      await appendSnapshot(snap);
+    } catch { /* snapshot failures must never surface to users */ }
+  })();
 
   return NextResponse.json(data);
 }
