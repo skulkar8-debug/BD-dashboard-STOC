@@ -2158,25 +2158,32 @@ function DebugTab({ data }: { data: BDData | null }) {
 // ─── Sentiment Analysis Tab ───────────────────────────────────────────────────
 
 // Display theme config — merges raw classifications into meaningful business labels
-type DisplayThemeId = 'positive' | 'more_info' | 'dnc_not_interested' | 'automated' | 'neutral';
+type DisplayThemeId = 'positive' | 'more_info' | 'follow_up_later' | 'dnc_not_interested' | 'automated' | 'neutral';
 
 const DISPLAY_THEME_CONFIG: Record<DisplayThemeId, { label: string; color: string }> = {
-  positive:           { label: 'Interested / Wants to Connect',  color: '#10B981' },
-  more_info:          { label: 'Requested More Information',      color: '#0EA5E9' },
-  dnc_not_interested: { label: 'DNC / Remove / Not Interested',  color: '#EF4444' },
-  automated:          { label: 'Automated (OOO / Auto-Reply)',    color: '#9CA3AF' },
-  neutral:            { label: 'Neutral / No Clear Signal',       color: '#6B7280' },
+  positive:           { label: 'Interested / Wants to Connect',       color: '#10B981' },
+  more_info:          { label: 'Requested More Information',           color: '#0EA5E9' },
+  follow_up_later:    { label: 'Follow Up Later / Not Right Now',      color: '#F59E0B' },
+  dnc_not_interested: { label: 'DNC / Remove / Not Interested',        color: '#EF4444' },
+  automated:          { label: 'Automated (OOO / Auto-Reply)',          color: '#9CA3AF' },
+  neutral:            { label: 'Neutral / No Clear Signal',            color: '#6B7280' },
 };
 
 // Catches remove/unsubscribe intent even when Instantly overrides final_classification
 const DNC_BODY_RE = /\bremove\b.{0,80}\bfrom\b.{0,30}\b(list|email list|mailing list|marketing|database|emails?)\b|\bremoved\b.{0,30}\bfrom\b.{0,30}\b(list|marketing|database|emails?)\b|\bto be removed\b|\b(contact|email) (info|information|address).{0,50}\bremov|\bunsubscribe\b|\bopt.?out\b|\bplease (remove|unsubscribe)\b|stop (emailing|contacting|sending)|don'?t (contact|email|reach out to) (me|us) (again|anymore|further)/i;
 
+// Signals that someone wants to be contacted later — distinct from "not interested"
+const FOLLOW_UP_RE = /\breach out (again|back|later|next week|next month|in \d|when i|after)\b|\bfollow.?up (later|next|in \d|when|after|in [a-z])|\bcall (me|us) (back|again|later|next|in \d)|\bcheck back (with|in|next|later|after)|\bnot (the |a )?right time\b|\bnot a good time\b|\btoo young to retire\b|\bnot (ready|looking) yet\b|\bget back to (you|me)\b|\breach back out\b|\bcontact (me|us) (in|next|after|later)\b|\btry (me|us) (again|next|later|in \d)\b|\bin (q[1-4]|january|february|march|april|may|june|july|august|september|october|november|december|the (spring|summer|fall|winter|new year))|\b\d+ (months?|weeks?|years?) (from now|away|out)\b|(reach out|follow up|call|email).{0,40}(next (week|month|quarter|year)|end of (the month|quarter|year))/i;
+
 function getDisplayTheme(email: NormalizedEmail): DisplayThemeId {
   const cls = email.final_classification;
-  // Body check FIRST — overrides any Instantly signal that wrongly marks removal as positive
-  if (DNC_BODY_RE.test(email.body_text || '')) return 'dnc_not_interested';
+  const body = email.body_text || '';
+  // DNC body check FIRST — overrides any Instantly signal that wrongly marks removal as positive
+  if (DNC_BODY_RE.test(body)) return 'dnc_not_interested';
   if (cls === 'positive_interested' || cls === 'meeting_requested' || cls === 'referral_given') return 'positive';
   if (cls === 'more_info_requested') return 'more_info';
+  // Follow-up-later: someone not saying no forever, just not now
+  if (FOLLOW_UP_RE.test(body)) return 'follow_up_later';
   if (cls === 'not_interested' || cls === 'negative_complaint' || cls === 'unsubscribe') return 'dnc_not_interested';
   if (cls === 'out_of_office' || cls === 'auto_reply') return 'automated';
   return 'neutral';
@@ -2188,20 +2195,24 @@ function generateSentimentSummary(themeCounts: Record<DisplayThemeId, number>, t
   const pos = themeCounts.positive ?? 0;
   const neg = themeCounts.dnc_not_interested ?? 0;
   const info = themeCounts.more_info ?? 0;
+  const later = themeCounts.follow_up_later ?? 0;
   const neutral = themeCounts.neutral ?? 0;
   const posPct = pos / total;
   const negPct = neg / total;
+  const laterPct = later / total;
   const neutralPct = neutral / total;
   if (posPct >= 0.6) {
     if (info >= pos * 0.4) return 'Replies were predominantly positive, with most contacts requesting additional information about the opportunity.';
     return 'Replies were predominantly positive, reflecting strong engagement and interest from contacts reached.';
   }
   if (negPct >= 0.6) return 'Replies were primarily negative, with most contacts indicating they are not interested or requesting removal.';
+  if (laterPct >= 0.4) return 'A significant share of contacts asked to be followed up at a later time — strong pipeline signal.';
   if (neutralPct >= 0.5) return 'Replies were largely neutral or ambiguous, with limited clear signals of interest or disinterest.';
   if (posPct > negPct && posPct > neutralPct) {
     if (info + pos > total * 0.4) return 'Replies were mixed with a positive lean, with interest concentrated around information requests and follow-up conversations.';
     return 'Replies were mixed but leaning positive, with a notable share of contacts expressing openness or interest.';
   }
+  if ((pos + later) > neg && (pos + later) > neutral) return `Replies show pipeline potential — ${pos} interested and ${later} asking to be followed up later.`;
   if (negPct > posPct && negPct > neutralPct) return 'Replies were mixed but leaning negative, with not-interested responses outpacing positive engagement.';
   return 'Replies were distributed across multiple themes with no single dominant sentiment pattern.';
 }
@@ -2272,6 +2283,7 @@ function SentimentBox({ group }: { group: SentimentGroup }) {
   const BOX_THEME: Record<DisplayThemeId, { bg: string; border: string }> = {
     positive:           { bg: 'bg-emerald-50',  border: 'border-emerald-200' },
     more_info:          { bg: 'bg-sky-50',       border: 'border-sky-200' },
+    follow_up_later:    { bg: 'bg-amber-50',     border: 'border-amber-200' },
     dnc_not_interested: { bg: 'bg-red-50',       border: 'border-red-200' },
     automated:          { bg: 'bg-gray-50',      border: 'border-gray-200' },
     neutral:            { bg: 'bg-gray-50',      border: 'border-gray-200' },
