@@ -20,6 +20,8 @@ async function fetchOrgData(org: OrgConfig): Promise<OrgData> {
     return { org, campaigns: [], emails: [], errors: { campaigns: 'No API key configured' } };
   }
 
+  const pause = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
   // 1. Campaigns
   let rawCampaigns: Awaited<ReturnType<typeof fetchCampaigns>> = [];
   try {
@@ -29,13 +31,18 @@ async function fetchOrgData(org: OrgConfig): Promise<OrgData> {
     return { org, campaigns: [], emails: [], errors };
   }
 
+  // Pause between call types to avoid burst rate-limit hits
+  await pause(1500);
+
   // 2. Analytics — GET /api/v2/campaigns/analytics returns an array for all campaigns
   let analyticsMap: Record<string, InstantlyAnalytics> = {};
   const analyticsResult = await fetchAllCampaignAnalytics(org.apiKey);
   analyticsMap = analyticsResult.data;
   if (analyticsResult.error) errors.analytics = analyticsResult.error;
 
-  // 3. Received emails — org-wide, up to 500
+  await pause(1500);
+
+  // 3. Received emails — org-wide, up to 10,000
   let rawEmails: Awaited<ReturnType<typeof fetchReceivedEmails>> = [];
   let email_pull_warning: string | undefined;
   try {
@@ -113,14 +120,15 @@ export async function GET(req: Request) {
     }, { status: 400 });
   }
 
-  // Fetch orgs sequentially to avoid shared rate-limit collisions between
-  // orgs on the same Instantly account (e.g. My Org + AEG Vision share a pool)
+  // Fetch orgs sequentially with a gap between each to avoid rate-limit collisions
+  // (some orgs share the same Instantly account pool, e.g. My Org + AEG Vision)
   const orgData: OrgData[] = [];
-  for (const org of orgs) {
+  for (let i = 0; i < orgs.length; i++) {
+    if (i > 0) await new Promise<void>((r) => setTimeout(r, 3000));
     try {
-      orgData.push(await fetchOrgData(org));
+      orgData.push(await fetchOrgData(orgs[i]));
     } catch (e) {
-      orgData.push({ org, campaigns: [], emails: [], errors: { campaigns: String(e) } });
+      orgData.push({ org: orgs[i], campaigns: [], emails: [], errors: { campaigns: String(e) } });
     }
   }
 

@@ -6,11 +6,15 @@ import type {
 
 const BASE = 'https://api.instantly.ai/api/v2';
 
+// Shared state: track last request time to enforce a global minimum gap
+let lastRequestAt = 0;
+const MIN_REQUEST_GAP_MS = 600; // never fire faster than ~100 req/min across all calls
+
 async function get<T>(
   apiKey: string,
   path: string,
   params: Record<string, string | string[]> = {},
-  retries = 4
+  retries = 5
 ): Promise<T> {
   const url = new URL(`${BASE}${path}`);
   Object.entries(params).forEach(([k, v]) => {
@@ -18,6 +22,11 @@ async function get<T>(
     else url.searchParams.set(k, v);
   });
   for (let attempt = 0; attempt <= retries; attempt++) {
+    // Enforce minimum gap between all requests
+    const gap = Date.now() - lastRequestAt;
+    if (gap < MIN_REQUEST_GAP_MS) await sleep(MIN_REQUEST_GAP_MS - gap);
+    lastRequestAt = Date.now();
+
     const res = await fetch(url.toString(), {
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -28,10 +37,11 @@ async function get<T>(
     if (res.status === 429) {
       if (attempt === retries) {
         const text = await res.text();
-        throw new Error(`Instantly ${path} → 429: ${text.slice(0, 300)}`);
+        throw new Error(`Instantly ${path} → 429 after ${retries} retries: ${text.slice(0, 300)}`);
       }
-      // Back off: 3s, 6s, 12s, 24s
-      const wait = 3000 * Math.pow(2, attempt);
+      // Exponential backoff: 5s, 10s, 20s, 40s, 80s
+      const wait = 5000 * Math.pow(2, attempt);
+      console.warn(`[Instantly] 429 on ${path}, waiting ${wait / 1000}s (attempt ${attempt + 1}/${retries})`);
       await sleep(wait);
       continue;
     }
@@ -47,13 +57,13 @@ async function get<T>(
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 // Paginate endpoints that return { items, next_starting_after }
-// interPageDelayMs: pause between pages to stay under 20 req/min rate limit per key
+// MIN_REQUEST_GAP_MS in get() already enforces a floor; interPageDelayMs adds extra breathing room
 async function paginateItems<T>(
   apiKey: string,
   path: string,
   params: Record<string, string> = {},
   maxItems = 500,
-  interPageDelayMs = 0
+  interPageDelayMs = 800
 ): Promise<T[]> {
   const items: T[] = [];
   let startingAfter: string | undefined;
