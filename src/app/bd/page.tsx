@@ -2302,15 +2302,34 @@ const DNC_BODY_RE = /\bremove\b.{0,80}\bfrom\b.{0,30}\b(list|email list|mailing 
 // Signals that someone wants to be contacted later — distinct from "not interested"
 const FOLLOW_UP_RE = /\breach out (again|back|later|next week|next month|in \d|when i|after)\b|\bfollow.?up (later|next|in \d|when|after|in [a-z])|\bcall (me|us) (back|again|later|next|in \d)|\bcheck back (with|in|next|later|after)|\bnot (the |a )?right time\b|\bnot a good time\b|\btoo young to retire\b|\bnot (ready|looking) yet\b|\bget back to (you|me)\b|\breach back out\b|\bcontact (me|us) (in|next|after|later)\b|\btry (me|us) (again|next|later|in \d)\b|\bin (q[1-4]|january|february|march|april|may|june|july|august|september|october|november|december|the (spring|summer|fall|winter|new year))|\b\d+ (months?|weeks?|years?) (from now|away|out)\b|(reach out|follow up|call|email).{0,40}(next (week|month|quarter|year)|end of (the month|quarter|year))/i;
 
+// Strip quoted/threaded content so display-layer checks don't fire on our own outbound email text
+function stripQuotedForDisplay(body: string): string {
+  const markers = [
+    /\nOn .{10,100}wrote:\s*\n/i,
+    /\n>+ /,
+    /\n-{3,}.*original.*message.*-{3,}/i,
+    /\nFrom:\s+["\w]/i,
+    /\n_{5,}/,
+    /\n.{2,50} wrote:\s*\n/,
+  ];
+  let earliest = body.length;
+  for (const m of markers) {
+    const hit = m.exec(body);
+    if (hit && hit.index > 0 && hit.index < earliest) earliest = hit.index;
+  }
+  return body.slice(0, earliest).trim();
+}
+
 function getDisplayTheme(email: NormalizedEmail): DisplayThemeId {
   const cls = email.final_classification;
   const body = email.body_text || '';
-  // DNC body check FIRST — overrides any Instantly signal that wrongly marks removal as positive
+  // DNC body check FIRST on full body — catches "remove from list" anywhere in thread
   if (DNC_BODY_RE.test(body)) return 'dnc_not_interested';
   if (cls === 'positive_interested' || cls === 'meeting_requested' || cls === 'referral_given') return 'positive';
   if (cls === 'more_info_requested') return 'more_info';
-  // Follow-up-later: someone not saying no forever, just not now
-  if (FOLLOW_UP_RE.test(body)) return 'follow_up_later';
+  // Follow-up-later: run on STRIPPED text only — outbound email CTA text ("follow up in case")
+  // would otherwise cause false positives here
+  if (FOLLOW_UP_RE.test(stripQuotedForDisplay(body))) return 'follow_up_later';
   if (cls === 'not_interested' || cls === 'negative_complaint' || cls === 'unsubscribe') return 'dnc_not_interested';
   if (cls === 'out_of_office' || cls === 'auto_reply') return 'automated';
   return 'neutral';

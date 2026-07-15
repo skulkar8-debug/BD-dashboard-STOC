@@ -70,6 +70,12 @@ const AUTO_REPLY_PATTERNS = [
   /do not (reply|respond) to this (email|message|address|notification)/i,
   /this (is |was )?an? (automated|automatic|system) (email|message|notification|response)/i,
   /unusual (level|volume|amount) of (activity|email|emails|messages)/i,
+  // Branded "we received your message, will respond in X days" auto-replies
+  /please allow \d+.{0,20}(business )?days? (for a response|to respond|to get back|before)/i,
+  /we.{0,20}(work|working) on getting back to you/i,
+  /we appreciate your patience.{0,60}(response|back|reply)/i,
+  /great things take time/i,
+  /thank you for (contacting|reaching out to|your inquiry|your message).{0,80}(get back|respond|reply|business days?)/i,
   // Security / challenge responses
   /\bchallenge.response\b/i,
   /(this is a )?(security |email )?(challenge|verification) (email|message|response)/i,
@@ -88,15 +94,17 @@ const AUTO_REPLY_PATTERNS = [
 ];
 
 const OOO_PATTERNS = [
-  /out of office/i,
+  /out of (the )?office/i,
   /on vacation/i,
   /on (annual |parental |maternity |paternity )?leave/i,
   /away from (the )?office/i,
   /will (be back|return) on/i,
   /automatic(ally)? reply/i,
   /auto.?reply/i,
-  /i am currently (out|away|unavailable)/i,
+  /(i am|we are|i'm|we're) currently (out|away|unavailable)/i,
   /returning (on|the week of)/i,
+  /back in (the )?office (on|after|monday|tuesday|wednesday|thursday|friday)/i,
+  /will be (back|returning|in the office) (on|by|after)/i,
 ];
 
 const UNSUBSCRIBE_PATTERNS = [
@@ -112,6 +120,8 @@ const UNSUBSCRIBE_PATTERNS = [
   /^(no[.,]?\s+)?stop[.,]?\s*$/im,
   /^stop (this|it|now|please)[.,]?\s*$/im,
   /\bstop (this|it|now)\b/i,
+  // Standalone "Remove" on its own line — prospect typed just "Remove" meaning take me off
+  /^\s*remove[.!]?\s*$/im,
   // "Remove from list" / "remove us from this list" / "remove [X] from your marketing"
   /\bremove\b.{0,80}\bfrom\b.{0,30}\b(list|email list|mailing list|marketing|database|emails?)\b/i,
   // "removed from your/this/the list"
@@ -135,6 +145,9 @@ const NOT_INTERESTED_PATTERNS = [
   /not (open to|thinking about|planning)/i,
   /recently (sold|sold it|closed)/i,
   /already (sold|have a buyer|under contract|in process)/i,
+  /already (engaged|working) with (another|a different|an existing) (company|firm|advisor|broker|agent|partner)/i,
+  /already (engaged|working) with someone/i,
+  /currently (engaged|working) with (another|a different)/i,
   /not (available|for sale|on the market)/i,
   /wrong (person|number|email|contact)/i,
   /not the (right|best) person/i,
@@ -201,6 +214,10 @@ const REFERRAL_PATTERNS = [
   /we (sold|sold the business) (last year|recently|in \d{4})/i,
   /sold (last year|recently|in \d{4})/i,
   /i already (sold|exited|left)/i,
+  // "Company was sold X years ago" / "sold over 5 years ago"
+  /\b(company|business|practice|office|firm|clinic|location)\b.{0,60}\bwas sold\b/i,
+  /\bsold\b.{0,40}\b(\d+|a few|several|many) years? ago\b/i,
+  /\bsold\b.{0,40}\b(over|more than|almost|nearly|about) \d+ years?\b/i,
 ];
 
 const MORE_INFO_PATTERNS = [
@@ -241,20 +258,24 @@ function match(text: string, patterns: RegExp[]): boolean {
 
 // Classify only the reply portion (quoted content stripped)
 function classifyFromText(rawText: string): ReplyClassification {
+  // System/automated signals: run on FULL text first — many OOO/auto-reply systems
+  // echo the original message first, putting their response text AFTER the quote marker,
+  // which means stripQuotedContent would eliminate it before we check.
+  if (match(rawText, BOUNCE_PATTERNS))     return 'bounce';
+  if (match(rawText, AUTO_REPLY_PATTERNS)) return 'auto_reply';
+  if (match(rawText, OOO_PATTERNS))        return 'out_of_office';
+
+  // Human intent: strip quoted thread so outbound email content doesn't produce false positives
   const text = stripQuotedContent(rawText);
   if (!text || text.trim().length < 3) return 'neutral_needs_review';
 
-  // System/automated detection first — these are never human replies
-  if (match(text, BOUNCE_PATTERNS))        return 'bounce';
-  if (match(text, AUTO_REPLY_PATTERNS))    return 'auto_reply';
-  if (match(text, OOO_PATTERNS))           return 'out_of_office';
-  if (match(text, UNSUBSCRIBE_PATTERNS))   return 'unsubscribe';
+  if (match(text, UNSUBSCRIBE_PATTERNS))    return 'unsubscribe';
   // NOT interested BEFORE positive — avoids "not interested" matching positive patterns
   if (match(text, NOT_INTERESTED_PATTERNS)) return 'not_interested';
-  if (match(text, MEETING_PATTERNS))       return 'meeting_requested';
-  if (match(text, REFERRAL_PATTERNS))      return 'referral_given';
-  if (match(text, MORE_INFO_PATTERNS))     return 'more_info_requested';
-  if (match(text, POSITIVE_PATTERNS))      return 'positive_interested';
+  if (match(text, MEETING_PATTERNS))        return 'meeting_requested';
+  if (match(text, REFERRAL_PATTERNS))       return 'referral_given';
+  if (match(text, MORE_INFO_PATTERNS))      return 'more_info_requested';
+  if (match(text, POSITIVE_PATTERNS))       return 'positive_interested';
 
   return 'neutral_needs_review';
 }
