@@ -63,24 +63,27 @@ export function defaultFilters(): FilterState {
   };
 }
 
+// Analytics overlay keyed by campaign_id — date-filtered sent/bounce/open/unsub counts
+export type AnalyticsOverride = Record<string, {
+  sent: number; opens: number; opens_unique: number;
+  bounces: number; unsubscribes: number;
+}>;
+
 export function useBDData() {
   const [data, setData] = useState<BDData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<FilterState>(defaultFilters());
+  // Date-filtered analytics overlay — fetched separately (fast, no email pagination)
+  const [analyticsOverride, setAnalyticsOverride] = useState<AnalyticsOverride | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
 
-  // Load data for a specific date range. Dates are passed to the analytics API so
-  // sent/open/bounce counts reflect the selected period (same as Zapier does).
-  const load = useCallback(async (fromDate: string, toDate: string, forceRefresh = false) => {
+  // Full data load — emails + campaigns, date-free, cached 12h. Runs once on mount.
+  const load = useCallback(async (forceRefresh = false) => {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams();
-      if (forceRefresh) params.set('refresh', '1');
-      if (fromDate) params.set('from', fromDate);
-      if (toDate)   params.set('to', toDate);
-      const qs = params.toString();
-      const res = await fetch(qs ? `/api/instantly/data?${qs}` : '/api/instantly/data');
+      const res = await fetch(forceRefresh ? '/api/instantly/data?refresh=1' : '/api/instantly/data');
       if (!res.ok) {
         let msg = `HTTP ${res.status}`;
         try {
@@ -98,14 +101,54 @@ export function useBDData() {
     }
   }, []);
 
-  // Re-fetch analytics whenever the date range changes
-  const { from_date, to_date } = filters;
-  useEffect(() => { load(from_date, to_date); }, [load, from_date, to_date]);
+  // Lightweight analytics overlay — only /campaigns/analytics per org, no email pagination.
+  // Runs when dates change; shows a subtle indicator without blocking the full UI.
+  const loadAnalytics = useCallback(async (fromDate: string, toDate: string) => {
+    if (!fromDate && !toDate) {
+      setAnalyticsOverride(null);
+      return;
+    }
+    setAnalyticsLoading(true);
+    try {
+      const params = new URLSearchParams({ from: fromDate, to: toDate });
+      const res = await fetch(`/api/instantly/analytics?${params}`);
+      if (!res.ok) return;
+      const json = await res.json() as { analytics: AnalyticsOverride };
+      setAnalyticsOverride(json.analytics ?? null);
+    } catch { /* overlay failure is non-fatal */ } finally {
+      setAnalyticsLoading(false);
+    }
+  }, []);
 
-  const allCampaigns = useMemo<NormalizedCampaign[]>(
-    () => data?.orgs.flatMap((o) => o.campaigns) ?? [],
-    [data]
-  );
+  useEffect(() => { load(); }, [load]);
+
+  const { from_date, to_date } = filters;
+  useEffect(() => { loadAnalytics(from_date, to_date); }, [loadAnalytics, from_date, to_date]);
+
+  // When analyticsOverride is available, patch sent/bounce/open/unsub on each campaign
+  // so all downstream stats reflect the date-filtered period
+  const allCampaigns = useMemo<NormalizedCampaign[]>(() => {
+    const base = data?.orgs.flatMap((o) => o.campaigns) ?? [];
+    if (!analyticsOverride) return base;
+    return base.map((c) => {
+      const ov = analyticsOverride[c.campaign_id];
+      if (!ov) return c;
+      const sent = ov.sent;
+      const r1 = (n: number) => Math.round((sent > 0 ? (n / sent) * 100 : 0) * 10) / 10;
+      return {
+        ...c,
+        sent,
+        opens: ov.opens,
+        opens_unique: ov.opens_unique,
+        bounces: ov.bounces,
+        unsubscribes: ov.unsubscribes,
+        bounce_rate: r1(ov.bounces),
+        unsubscribe_rate: r1(ov.unsubscribes),
+        open_rate: r1(ov.opens),
+        analytics_available: true,
+      };
+    });
+  }, [data, analyticsOverride]);
   const allEmails = useMemo<NormalizedEmail[]>(
     () => data?.orgs.flatMap((o) => o.emails) ?? [],
     [data]
@@ -294,14 +337,12 @@ export function useBDData() {
     };
   }, [filteredCampaigns, filteredEmails, humanEmails, positiveEmails]);
 
-  // Whether the analytics API was called with date params — when true, sent/open/bounce
-  // reflect the selected period instead of all-time totals
-  const analyticsDateFiltered = Boolean(data?.analytics_from_date || data?.analytics_to_date);
+  const analyticsDateFiltered = Boolean(analyticsOverride);
 
   return {
     data, loading, error,
-    refresh: () => load(filters.from_date, filters.to_date),
-    hardRefresh: () => load(filters.from_date, filters.to_date, true),
+    refresh: () => load(),
+    hardRefresh: () => load(true),
     filters, setFilters, updateFilter, setDatePreset, resetFilters,
     allCampaigns, allEmails,
     filteredCampaigns, filteredEmails, humanEmails, positiveEmails,
@@ -309,5 +350,6 @@ export function useBDData() {
     campaignStats,
     options, stats,
     analyticsDateFiltered,
+    analyticsLoading,
   };
 }

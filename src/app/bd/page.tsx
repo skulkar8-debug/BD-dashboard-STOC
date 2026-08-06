@@ -2791,6 +2791,12 @@ export default function BDDashboard() {
               filters={bd.filters}
               analyticsDateNote={bd.analyticsDateFiltered}
             />
+            {bd.analyticsLoading && (
+              <div className="flex items-center gap-1.5 text-[11px] text-blue-500 px-1">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Fetching date-filtered sent/bounce/open…
+              </div>
+            )}
           </>
         )}
 

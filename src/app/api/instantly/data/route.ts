@@ -15,7 +15,7 @@ export const maxDuration = 300; // Vercel Pro: allow up to 5 min for full email 
 const cacheByKey = new Map<string, { data: BDData; expires: number }>();
 const CACHE_TTL = 12 * 60 * 60 * 1000;
 
-async function fetchOrgData(org: OrgConfig, fromDate?: string, toDate?: string): Promise<OrgData> {
+async function fetchOrgData(org: OrgConfig): Promise<OrgData> {
   const errors: OrgData['errors'] = {};
 
   if (!org.apiKey) {
@@ -36,9 +36,9 @@ async function fetchOrgData(org: OrgConfig, fromDate?: string, toDate?: string):
   // Pause between call types to avoid burst rate-limit hits
   await pause(1500);
 
-  // 2. Analytics — date-filtered when from/to supplied (same as Zapier does)
+  // 2. Analytics — all-time (date-filtered analytics handled by /api/instantly/analytics)
   let analyticsMap: Record<string, InstantlyAnalytics> = {};
-  const analyticsResult = await fetchAllCampaignAnalytics(org.apiKey, fromDate, toDate);
+  const analyticsResult = await fetchAllCampaignAnalytics(org.apiKey);
   analyticsMap = analyticsResult.data;
   if (analyticsResult.error) errors.analytics = analyticsResult.error;
 
@@ -102,10 +102,7 @@ export async function GET(req: Request) {
   const now = Date.now();
   const url = new URL(req.url);
   const refresh = url.searchParams.get('refresh');
-  // from/to are YYYY-MM-DD strings sent by the client for date-filtered analytics
-  const fromDate = url.searchParams.get('from') ?? '';
-  const toDate   = url.searchParams.get('to')   ?? '';
-  const cacheKey = `${fromDate}|${toDate}`;
+  const cacheKey = '|'; // single all-time key — date filtering handled by /analytics endpoint
   const cached = cacheByKey.get(cacheKey);
   if (cached && now < cached.expires && !refresh) {
     return NextResponse.json(cached.data);
@@ -134,7 +131,7 @@ export async function GET(req: Request) {
   for (let i = 0; i < orgs.length; i++) {
     if (i > 0) await new Promise<void>((r) => setTimeout(r, 3000));
     try {
-      orgData.push(await fetchOrgData(orgs[i], fromDate || undefined, toDate || undefined));
+      orgData.push(await fetchOrgData(orgs[i]));
     } catch (e) {
       orgData.push({ org: orgs[i], campaigns: [], emails: [], errors: { campaigns: String(e) } });
     }
@@ -143,8 +140,6 @@ export async function GET(req: Request) {
   const data: BDData = {
     orgs: orgData,
     fetched_at: new Date().toISOString(),
-    analytics_from_date: fromDate || undefined,
-    analytics_to_date: toDate || undefined,
     total_campaigns: orgData.reduce((s, o) => s + o.campaigns.length, 0),
     total_emails: orgData.reduce((s, o) => s + o.emails.length, 0),
   };
