@@ -91,12 +91,17 @@ export async function fetchCampaigns(apiKey: string): Promise<InstantlyCampaign[
 
 // GET /api/v2/campaigns/analytics returns a raw array (not paginated items wrapper)
 // Each item: { campaign_id, campaign_name, emails_sent_count, open_count, reply_count, ... }
+// When fromDate/toDate are supplied, the API returns metrics for that period only (like Zapier does).
 export async function fetchAllCampaignAnalytics(
-  apiKey: string
+  apiKey: string,
+  fromDate?: string,
+  toDate?: string,
 ): Promise<{ data: Record<string, InstantlyAnalytics>; error?: string }> {
   try {
-    // Returns a raw array — fetch with large limit
-    const res = await get<unknown>(apiKey, '/campaigns/analytics', { limit: '2000' });
+    const params: Record<string, string> = { limit: '2000' };
+    if (fromDate) params.start_date = fromDate;
+    if (toDate)   params.end_date   = toDate;
+    const res = await get<unknown>(apiKey, '/campaigns/analytics', params);
 
     let items: InstantlyAnalytics[] = [];
     if (Array.isArray(res)) {

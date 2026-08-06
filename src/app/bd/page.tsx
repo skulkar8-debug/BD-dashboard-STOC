@@ -138,13 +138,14 @@ function CsvBtn({ onClick }: { onClick: () => void }) {
 }
 
 // ─── Scope-aware rate display ─────────────────────────────────────────────────
-// Instantly analytics fields (sent, bounces, etc.) are always all-time totals.
-// Email pull counts respect UI filters. When scopes differ, hide the percentage.
+// When a date range is selected, the analytics API is called with those dates, so
+// sent/open/bounce are date-filtered and match the email scope. When no dates are
+// set (datePreset='all'), analytics are all-time and reply rates are approximate.
 
 const SCOPE_MISMATCH_TITLE =
-  'Percentage hidden — denominator (sent) is all-time from Instantly analytics; numerator is date/filter-scoped. Scopes do not match.';
+  'Percentage hidden — sent count uses all-time analytics when no date range is set; numerator is filter-scoped. Select a date range to align both.';
 const SCOPE_APPROX_TITLE =
-  'Approximate — sent count is all-time from Instantly analytics. Email pull may not cover full campaign history.';
+  'Approximate — email pull may not cover the full campaign history for the selected period.';
 
 /** Render a reply-rate where denominator is lifetime `sent` and numerator is filtered replies. */
 function ScopedRate({
@@ -231,12 +232,13 @@ function FilterDebugBar({
           Active: {activeFilters.join(' · ')}
         </span>
       )}
-      <span className="text-gray-400" title="Sent † columns use all-time data from Instantly analytics. Reply% † hides when filters are active because the denominator scope doesn't match the numerator.">
-        † = all-time denominator
-      </span>
-      {analyticsDateNote && (
-        <span className="text-amber-500">
-          ⚠ Sent/Bounce/Opps are all-time — Instantly analytics are not date-filterable. Reply% hidden when filters active.
+      {analyticsDateNote ? (
+        <span className="text-emerald-600" title="Sent, open, and bounce counts now reflect the selected date range — analytics API called with your date filter.">
+          ✓ Sent/Bounce/Open are date-filtered
+        </span>
+      ) : (
+        <span className="text-gray-400" title="No date range selected — analytics reflect all-time totals. Select a date preset to filter sent/bounce/open.">
+          † = all-time (no date range set)
         </span>
       )}
     </div>
@@ -246,12 +248,13 @@ function FilterDebugBar({
 // ─── Overview ─────────────────────────────────────────────────────────────────
 
 function OverviewTab({
-  campaigns, emails, stats, analyticsAvailable, isFiltered, campaignStats,
+  campaigns, emails, stats, analyticsAvailable, analyticsDateFiltered, isFiltered, campaignStats,
 }: {
   campaigns: NormalizedCampaign[];
   emails: NormalizedEmail[];
   stats: ReturnType<typeof useBDData>['stats'];
   analyticsAvailable: boolean;
+  analyticsDateFiltered: boolean;
   isFiltered: boolean;
   campaignStats: ReturnType<typeof useBDData>['campaignStats'];
 }) {
@@ -360,7 +363,7 @@ function OverviewTab({
             <div className={`text-2xl font-bold tabular-nums ${noAnalytics ? 'text-gray-300' : 'text-gray-900'}`}>
               {noAnalytics ? '—' : fmt(stats.sent)}
             </div>
-            <div className="text-[10px] text-gray-500 mt-0.5 leading-tight">Emails Sent<br /><span className="text-gray-400">(all-time)</span></div>
+            <div className="text-[10px] text-gray-500 mt-0.5 leading-tight">Emails Sent<br /><span className="text-gray-400">{analyticsDateFiltered ? '(date-filtered)' : '(all-time)'}</span></div>
           </div>
           {/* Replies */}
           <div className="bg-white border border-gray-200 rounded-xl p-4 text-center shadow-sm">
@@ -384,7 +387,7 @@ function OverviewTab({
             <div className={`text-2xl font-bold tabular-nums ${noAnalytics ? 'text-gray-300' : stats.bounce_rate > 5 ? 'text-red-600' : 'text-gray-900'}`}>
               {noAnalytics ? '—' : `${stats.bounce_rate}%`}
             </div>
-            <div className="text-[10px] text-gray-500 mt-0.5 leading-tight">Bounce Rate<br /><span className="text-gray-400">(all-time)</span></div>
+            <div className="text-[10px] text-gray-500 mt-0.5 leading-tight">Bounce Rate<br /><span className="text-gray-400">{analyticsDateFiltered ? '(date-filtered)' : '(all-time)'}</span></div>
           </div>
           {/* Active campaigns */}
           <div className="bg-white border border-gray-200 rounded-xl p-4 text-center shadow-sm">
@@ -2786,7 +2789,7 @@ export default function BDDashboard() {
               totalEmails={bd.allEmails.length}
               filteredEmails={bd.filteredEmails.length}
               filters={bd.filters}
-              analyticsDateNote={bd.filters.datePreset !== 'all'}
+              analyticsDateNote={bd.analyticsDateFiltered}
             />
           </>
         )}
@@ -2799,7 +2802,7 @@ export default function BDDashboard() {
           </div>
         ) : !bd.data ? null : (
           <>
-            {tab === 'overview'  && <OverviewTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} stats={bd.stats} analyticsAvailable={bd.stats.analyticsAvailable} isFiltered={isFiltered} campaignStats={bd.campaignStats} />}
+            {tab === 'overview'  && <OverviewTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} stats={bd.stats} analyticsAvailable={bd.stats.analyticsAvailable} analyticsDateFiltered={bd.analyticsDateFiltered} isFiltered={isFiltered} campaignStats={bd.campaignStats} />}
             {tab === 'sectors'   && <SectorsTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} isFiltered={isFiltered} campaignStats={bd.campaignStats} />}
             {tab === 'states'    && <StatesTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} isFiltered={isFiltered} />}
             {tab === 'compare'   && <CompareTab filteredCampaigns={bd.compareCampaigns} filteredEmails={bd.compareEmails} sectorA={sectorA} setSectorA={setSectorA} sectorB={sectorB} setSectorB={setSectorB} compareMode={compareMode} setCompareMode={setCompareMode} ownerA={ownerA} setOwnerA={setOwnerA} ownerB={ownerB} setOwnerB={setOwnerB} />}

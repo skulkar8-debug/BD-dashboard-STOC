@@ -235,6 +235,8 @@ export type OrgData = {
 export type BDData = {
   orgs: OrgData[];
   fetched_at: string;
+  analytics_from_date?: string;
+  analytics_to_date?: string;
   total_campaigns: number;
   total_emails: number;
 };

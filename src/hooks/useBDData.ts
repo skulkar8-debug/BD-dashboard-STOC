@@ -69,11 +69,18 @@ export function useBDData() {
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<FilterState>(defaultFilters());
 
-  const load = useCallback(async (forceRefresh = false) => {
+  // Load data for a specific date range. Dates are passed to the analytics API so
+  // sent/open/bounce counts reflect the selected period (same as Zapier does).
+  const load = useCallback(async (fromDate: string, toDate: string, forceRefresh = false) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(forceRefresh ? '/api/instantly/data?refresh=1' : '/api/instantly/data');
+      const params = new URLSearchParams();
+      if (forceRefresh) params.set('refresh', '1');
+      if (fromDate) params.set('from', fromDate);
+      if (toDate)   params.set('to', toDate);
+      const qs = params.toString();
+      const res = await fetch(qs ? `/api/instantly/data?${qs}` : '/api/instantly/data');
       if (!res.ok) {
         let msg = `HTTP ${res.status}`;
         try {
@@ -91,7 +98,9 @@ export function useBDData() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // Re-fetch analytics whenever the date range changes
+  const { from_date, to_date } = filters;
+  useEffect(() => { load(from_date, to_date); }, [load, from_date, to_date]);
 
   const allCampaigns = useMemo<NormalizedCampaign[]>(
     () => data?.orgs.flatMap((o) => o.campaigns) ?? [],
@@ -285,13 +294,20 @@ export function useBDData() {
     };
   }, [filteredCampaigns, filteredEmails, humanEmails, positiveEmails]);
 
+  // Whether the analytics API was called with date params — when true, sent/open/bounce
+  // reflect the selected period instead of all-time totals
+  const analyticsDateFiltered = Boolean(data?.analytics_from_date || data?.analytics_to_date);
+
   return {
-    data, loading, error, refresh: load, hardRefresh: () => load(true),
+    data, loading, error,
+    refresh: () => load(filters.from_date, filters.to_date),
+    hardRefresh: () => load(filters.from_date, filters.to_date, true),
     filters, setFilters, updateFilter, setDatePreset, resetFilters,
     allCampaigns, allEmails,
     filteredCampaigns, filteredEmails, humanEmails, positiveEmails,
     compareCampaigns, compareEmails,
     campaignStats,
     options, stats,
+    analyticsDateFiltered,
   };
 }
