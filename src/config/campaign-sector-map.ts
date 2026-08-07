@@ -68,6 +68,11 @@ export const CAMPAIGN_SECTOR_MAP: SectorMapping[] = [
   { campaign_name_pattern: 'Road Service',                       sector: 'Towing Service' },
   // Marina
   { campaign_name_pattern: 'Marina',                             sector: 'Marina' },
+  // Vacation Rental
+  { campaign_name_pattern: 'Vacation Rental',                    sector: 'Vacation Rental' },
+  { campaign_name_pattern: 'Vacation',                           sector: 'Vacation Rental' },
+  { campaign_name_pattern: 'Short Term Rental',                  sector: 'Vacation Rental' },
+  { campaign_name_pattern: 'STR ',                               sector: 'Vacation Rental' },
   // Laundromat
   { org: 'laundromat',                                           sector: 'Laundromat' },
   { campaign_name_pattern: 'Laundromat',                         sector: 'Laundromat' },
@@ -93,6 +98,7 @@ export const SECTOR_OPTIONS = [
   'Financial / Professional Services',
   'Marina',
   'Laundromat',
+  'Vacation Rental',
   'Other / Unmapped',
 ];
 

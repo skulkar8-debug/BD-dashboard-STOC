@@ -912,7 +912,11 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
 
   // Healthy = no issues AND actually produced replies (or didn't send enough to judge)
   const healthyDomains = domainHealth.filter((d) => d.issues.length === 0).sort((a, b) => b.replies - a.replies);
-  const problemDomains = domainHealth.filter((d) => d.issues.length > 0);
+  // Actively-sending problem domains first — an idle domain with account errors matters
+  // far less to this week's results than a domain currently pumping out email
+  const problemDomains = domainHealth
+    .filter((d) => d.issues.length > 0)
+    .sort((a, b) => (Number(b.sent > 0) - Number(a.sent > 0)) || b.sent - a.sent || (b.issues.length - a.issues.length));
 
   // ── What's not working ──
   const highBounceLastWk = useMemo(() => {
@@ -936,7 +940,11 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
   }, [campaigns, lastWkEmails, lastWk]);
 
   // ── What are we missing (auto-detected) ──
-  const unmappedCampaigns = campaigns.filter((c) => c.sector === 'Unmapped' || !c.sector).length;
+  const unmappedList = useMemo(
+    () => campaigns.filter((c) => !c.sector || c.sector === 'Unmapped' || c.sector === 'Other / Unmapped'),
+    [campaigns]
+  );
+  const unmappedCampaigns = unmappedList.length;
   const orgErrors = filteredAccounts?.filter((o) => o.error).map((o) => o.org_label) ?? [];
 
   // ── Focus recommendations ──
@@ -1082,7 +1090,10 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
                             <span>{r.sector}</span>
                           </span>
                         </td>
-                        <td className="text-right px-3 py-2 font-semibold tabular-nums">{fmt(r.sent)}</td>
+                        <td className="text-right px-3 py-2 font-semibold tabular-nums">
+                          {fmt(r.sent)}
+                          {r.sent === 0 && r.replies > 0 && <span className="text-gray-400 font-normal" title="No sends last week — these replies are to emails sent in earlier weeks">*</span>}
+                        </td>
                         <td className={`text-right px-3 py-2 tabular-nums text-[11px] ${delta > 0 ? 'text-emerald-600' : delta < 0 ? 'text-red-500' : 'text-gray-400'}`}>
                           {r.priorSent === 0 && r.sent === 0 ? '—' : `${delta > 0 ? '+' : ''}${fmt(delta)}`}
                         </td>
@@ -1111,7 +1122,7 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
             </table>
           </div>
           <div className="px-3 py-1.5 border-t border-gray-100 text-[10px] text-gray-400">
-            Click a row to expand by state. Sent/bounces are date-filtered analytics; replies/interested from the email pull. State-level sent is attributed via each campaign&apos;s mapped state.
+            Click a row to expand by state. Sent/bounces are date-filtered analytics; replies/interested from the email pull. * = replies to emails sent in earlier weeks (no sends last week).
           </div>
         </div>
       </div>
@@ -1305,7 +1316,10 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
             <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50 text-xs font-semibold text-gray-600">Auto-Detected Gaps</div>
             <div className="divide-y divide-gray-50">
               {unmappedCampaigns > 0 && (
-                <div className="px-3 py-2 text-xs text-gray-700">⚠ {unmappedCampaigns} campaign{unmappedCampaigns === 1 ? '' : 's'} without sector mapping</div>
+                <div className="px-3 py-2 text-xs text-gray-700">
+                  ⚠ {unmappedCampaigns} campaign{unmappedCampaigns === 1 ? '' : 's'} without sector mapping:
+                  <span className="text-gray-500"> {unmappedList.slice(0, 4).map((c) => c.campaign_name).join(', ')}{unmappedCampaigns > 4 ? ` and ${unmappedCampaigns - 4} more` : ''}</span>
+                </div>
               )}
               {orgErrors.map((o) => (
                 <div key={o} className="px-3 py-2 text-xs text-red-600">⚠ Account data unavailable for {o}</div>
