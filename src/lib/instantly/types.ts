@@ -7,6 +7,7 @@ export type InstantlyCampaign = {
   timestamp_created: string;
   timestamp_updated: string;
   tags?: string[];
+  email_list?: string[]; // sending account emails attached to this campaign
 };
 
 // Real field names from GET /api/v2/campaigns/analytics
@@ -230,6 +231,7 @@ export type NormalizedCampaign = {
   contacted_count: number;
   completed_count: number;
   analytics_available: boolean;
+  sending_accounts: string[]; // account emails attached to this campaign (for domain attribution)
   // From actual email pull
   actual_received_count: number;
   positive_reply_count: number;

@@ -785,10 +785,13 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
       .slice(0, 5);
   }, [lastWkEmails]);
 
-  // ── Domain health ──
+  // ── Domain health — DIAGNOSTIC: outcomes (sent/replies/bounces) per domain,
+  // not just Instantly's self-reported warmup score. A domain with 1,000 sends
+  // and zero replies is unhealthy no matter what its warmup score says.
   type DomainHealth = {
-    domain: string; org: string; total: number; healthy: number;
+    domain: string; org: string; total: number;
     avgScore: number; issues: string[];
+    sent: number; replies: number; bounces: number; bounceRate: number; replyRate: number;
   };
   // Accounts are org-level — apply the org filter (sector/state don't map to mailboxes)
   const filteredAccounts = useMemo(() => {
@@ -799,6 +802,8 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
 
   const domainHealth = useMemo<DomainHealth[]>(() => {
     if (!filteredAccounts) return [];
+
+    // 1. Warmup/status signals per domain from accounts
     const byDomain = new Map<string, { org: string; scores: number[]; statuses: number[]; warmups: number[] }>();
     filteredAccounts.forEach((o) => {
       o.accounts.forEach((a) => {
@@ -810,11 +815,47 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
         byDomain.set(domain, cur);
       });
     });
+
+    // 2. Attribute last week's outcomes to domains via each campaign's sending accounts.
+    // A campaign's sent/bounces are split evenly across its sending domains; replies
+    // counted per domain the same way.
+    const outcomes = new Map<string, { sent: number; replies: number; bounces: number }>();
+    const repliesByCampaign = new Map<string, number>();
+    lastWkEmails.forEach((e) => {
+      repliesByCampaign.set(e.campaign_id, (repliesByCampaign.get(e.campaign_id) ?? 0) + 1);
+    });
+    campaigns.forEach((c) => {
+      const cur = lastWk?.[c.campaign_id];
+      const replies = repliesByCampaign.get(c.campaign_id) ?? 0;
+      if (!cur && replies === 0) return;
+      const domains = [...new Set(c.sending_accounts.map((a) => a.split('@')[1]).filter(Boolean))];
+      if (domains.length === 0) return;
+      const share = 1 / domains.length;
+      domains.forEach((d) => {
+        const o = outcomes.get(d) ?? { sent: 0, replies: 0, bounces: 0 };
+        o.sent += (cur?.sent ?? 0) * share;
+        o.bounces += (cur?.bounces ?? 0) * share;
+        o.replies += replies * share;
+        outcomes.set(d, o);
+      });
+    });
+
     return [...byDomain.entries()].map(([domain, v]) => {
       const total = v.statuses.length;
-      const healthy = v.statuses.filter((s, i) => s === 1 && v.warmups[i] === 1 && (v.scores[i] || 0) >= 90).length;
       const avgScore = v.scores.length ? Math.round(v.scores.reduce((s, x) => s + x, 0) / v.scores.length) : 0;
+      const out = outcomes.get(domain) ?? { sent: 0, replies: 0, bounces: 0 };
+      const sent = Math.round(out.sent);
+      const replies = Math.round(out.replies);
+      const bounces = Math.round(out.bounces);
+      const bounceRate = sent > 0 ? Math.round((bounces / sent) * 1000) / 10 : 0;
+      const replyRate = sent > 0 ? Math.round((replies / sent) * 1000) / 10 : 0;
+
       const issues: string[] = [];
+      // Outcome-based symptoms FIRST — these are the diagnostic signals
+      if (sent >= 200 && replies === 0) issues.push(`${sent.toLocaleString()} sent, ZERO replies — possible spam placement`);
+      else if (sent >= 500 && replyRate < 0.3) issues.push(`reply rate ${replyRate}% on ${sent.toLocaleString()} sent — very low`);
+      if (sent >= 100 && bounceRate > 3) issues.push(`${bounceRate}% bounce`);
+      // Infra signals from Instantly account status
       const errorCount = v.statuses.filter((s) => s < 0).length;
       const pausedCount = v.statuses.filter((s) => s === 2).length;
       const badWarmup = v.warmups.filter((w) => w < 0).length;
@@ -823,11 +864,12 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
       if (pausedCount > 0) issues.push(`${pausedCount} paused`);
       if (badWarmup > 0) issues.push(`${badWarmup} warmup issue${badWarmup > 1 ? 's' : ''}`);
       if (lowScore > 0) issues.push(`${lowScore} low warmup score`);
-      return { domain, org: v.org, total, healthy, avgScore, issues };
-    }).sort((a, b) => (a.issues.length - b.issues.length) || b.avgScore - a.avgScore);
-  }, [filteredAccounts]);
+      return { domain, org: v.org, total, avgScore, issues, sent, replies, bounces, bounceRate, replyRate };
+    }).sort((a, b) => (b.issues.length - a.issues.length) || b.sent - a.sent);
+  }, [filteredAccounts, campaigns, lastWk, lastWkEmails]);
 
-  const healthyDomains = domainHealth.filter((d) => d.issues.length === 0);
+  // Healthy = no issues AND actually produced replies (or didn't send enough to judge)
+  const healthyDomains = domainHealth.filter((d) => d.issues.length === 0).sort((a, b) => b.replies - a.replies);
   const problemDomains = domainHealth.filter((d) => d.issues.length > 0);
 
   // ── What's not working ──
@@ -858,6 +900,9 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
   // ── Focus recommendations ──
   const focus = useMemo(() => {
     const items: { text: string; kind: 'good' | 'warn' | 'urgent' }[] = [];
+    if (lastSent >= 200 && lastWkEmails.length === 0) {
+      items.push({ text: `DELIVERABILITY ALARM: ${fmt(lastSent)} emails sent last week with ZERO replies — mail is likely landing in spam. Check DNS records (SPF/DKIM/DMARC), test inbox placement, and slow sending until diagnosed.`, kind: 'urgent' });
+    }
     if (lastPos > 0) items.push({ text: `Follow up on ${lastPos} positive repl${lastPos === 1 ? 'y' : 'ies'} from last week — top source: ${topCampaigns[0]?.c.campaign_name ?? 'n/a'}`, kind: 'good' });
     if (lastMeetings > 0) items.push({ text: `${lastMeetings} meeting request${lastMeetings === 1 ? '' : 's'} came in last week — confirm they are scheduled`, kind: 'good' });
     problemDomains.slice(0, 3).forEach((d) => items.push({ text: `Fix ${d.domain} (${d.org}): ${d.issues.join(', ')}`, kind: 'urgent' }));
@@ -867,7 +912,7 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
     if (lastBounceRate > 3) items.push({ text: `Overall bounce rate was ${lastBounceRate}% last week — audit data sources if this persists`, kind: 'warn' });
     if (unmappedCampaigns > 0) items.push({ text: `${unmappedCampaigns} campaign${unmappedCampaigns === 1 ? '' : 's'} missing sector mapping — add to campaign-sector-map`, kind: 'warn' });
     return items;
-  }, [lastPos, lastMeetings, topCampaigns, problemDomains, highBounceLastWk, silentActive, topSectors, lastBounceRate, unmappedCampaigns]);
+  }, [lastPos, lastMeetings, topCampaigns, problemDomains, highBounceLastWk, silentActive, topSectors, lastBounceRate, unmappedCampaigns, lastSent, lastWkEmails.length]);
 
   // ── Org → Sector → State breakdown (mirrors the weekly email report) ──
   type SectorRow = {
@@ -1087,9 +1132,12 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
                   <div key={d.domain} className="px-3 py-1.5 flex items-center justify-between gap-2">
                     <div className="min-w-0">
                       <div className="text-xs font-medium text-gray-800 truncate">{d.domain}</div>
-                      <div className="text-[10px] text-gray-400">{d.org} · {d.total} account{d.total > 1 ? 's' : ''}</div>
+                      <div className="text-[10px] text-gray-400">{d.org} · {d.total} acct{d.total > 1 ? 's' : ''} · score {d.avgScore}</div>
                     </div>
-                    <span className="text-xs font-bold text-emerald-600 flex-shrink-0">{d.avgScore}</span>
+                    <div className="text-right flex-shrink-0">
+                      <div className="text-xs font-bold text-emerald-600">{d.replies} repl</div>
+                      <div className="text-[10px] text-gray-400">{d.sent.toLocaleString()} sent · {d.bounceRate}% bnc</div>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1112,7 +1160,7 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
                   <div key={d.domain} className="px-3 py-2">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-xs font-medium text-gray-800 truncate">{d.domain}</span>
-                      <span className="text-[10px] text-gray-400 flex-shrink-0">{d.org} · score {d.avgScore}</span>
+                      <span className="text-[10px] text-gray-400 flex-shrink-0">{d.org} · {d.sent.toLocaleString()} sent · {d.replies} repl · score {d.avgScore}</span>
                     </div>
                     <div className="text-[10px] text-red-500 mt-0.5">{d.issues.join(' · ')}</div>
                   </div>

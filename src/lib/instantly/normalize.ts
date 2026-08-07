@@ -243,6 +243,7 @@ export function normalizeCampaign(
     contacted_count: a?.contacted_count ?? 0,
     completed_count: a?.completed_count ?? 0,
     analytics_available: !!analytics,
+    sending_accounts: campaign.email_list ?? [],
     actual_received_count,
     positive_reply_count,
     last_reply_date,
