@@ -39,11 +39,11 @@ export async function GET(req: Request) {
     const result = await fetchAllCampaignAnalytics(org.apiKey, fromDate, toDate);
     for (const [campaignId, a] of Object.entries(result.data)) {
       merged[campaignId] = {
-        sent:          a.sent                ?? 0,
-        opens:         a.opens               ?? 0,
-        opens_unique:  a.opens_unique         ?? 0,
-        bounces:       a.bounces              ?? 0,
-        unsubscribes:  a.unsubscribes         ?? 0,
+        sent:          a.emails_sent_count ?? 0,
+        opens:         a.open_count ?? 0,
+        opens_unique:  a.open_count_unique ?? a.open_count ?? 0,
+        bounces:       a.bounced_count ?? 0,
+        unsubscribes:  a.unsubscribed_count ?? 0,
       };
     }
   }

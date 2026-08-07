@@ -2,6 +2,7 @@ import type {
   InstantlyCampaign,
   InstantlyAnalytics,
   InstantlyEmail,
+  InstantlyAccount,
 } from './types';
 
 const BASE = 'https://api.instantly.ai/api/v2';
@@ -134,6 +135,11 @@ export async function fetchReceivedEmails(
   if (campaignId) params.campaign_id = campaignId;
   // 100ms between pages; retry-with-backoff in get() handles any 429s
   return paginateItems<InstantlyEmail>(apiKey, '/emails', params, limit, 100);
+}
+
+// GET /api/v2/accounts — sending accounts with status + warmup score
+export async function fetchAccounts(apiKey: string): Promise<InstantlyAccount[]> {
+  return paginateItems<InstantlyAccount>(apiKey, '/accounts', {}, 1000);
 }
 
 export async function fetchEmailById(

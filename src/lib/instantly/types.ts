@@ -31,6 +31,26 @@ export type InstantlyAnalytics = {
   link_click_count?: number;
 };
 
+// GET /api/v2/accounts — sending email accounts (domain health / warmup)
+export type InstantlyAccount = {
+  email: string;
+  timestamp_created?: string;
+  // 1=active, 2=paused, -1=connection error, -2=soft bounce error, -3=sending error
+  status?: number;
+  // 1=active, 0=paused, -1=banned, -2=spam folder unknown, -3=permanent suspension
+  warmup_status?: number;
+  stat_warmup_score?: number;
+  daily_limit?: number;
+  provider_code?: number;
+};
+
+export type OrgAccounts = {
+  org_id: string;
+  org_label: string;
+  accounts: InstantlyAccount[];
+  error?: string;
+};
+
 export type InstantlyEmail = {
   id: string;
   timestamp_created?: string;

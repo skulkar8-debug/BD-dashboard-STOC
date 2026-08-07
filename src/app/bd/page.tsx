@@ -20,7 +20,7 @@ import Image from 'next/image';
 
 // ─── Deep-link URL sync ───────────────────────────────────────────────────────
 
-const VALID_TABS = ['overview','sectors','states','compare','inbox','analytics','sentiment','debug'] as const;
+const VALID_TABS = ['overview','weekly','sectors','states','compare','inbox','analytics','sentiment','debug'] as const;
 type TabId = typeof VALID_TABS[number];
 
 type CompareMode = 'sector' | 'owner';
@@ -101,6 +101,7 @@ const StatePerformanceMap = dynamic(
 
 const TABS = [
   { id: 'overview',  label: 'Overview',   icon: <BarChart3 className="h-3.5 w-3.5" /> },
+  { id: 'weekly',    label: 'Weekly Review', icon: <Calendar className="h-3.5 w-3.5" /> },
   { id: 'sentiment', label: 'Sentiment',  icon: <MessageSquare className="h-3.5 w-3.5" /> },
   { id: 'states',    label: 'States',     icon: <MapPin className="h-3.5 w-3.5" /> },
   { id: 'compare',   label: 'Compare',    icon: <GitCompare className="h-3.5 w-3.5" /> },
@@ -612,6 +613,446 @@ function OverviewTab({
               )}
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Weekly Review ────────────────────────────────────────────────────────────
+// Answers: How did we perform last week? What's working? What's not?
+// What are we missing? Where should the team focus?
+
+type WeeklyOverride = Record<string, { sent: number; opens: number; opens_unique: number; bounces: number; unsubscribes: number }>;
+type WeeklyOrgAccounts = { org_id: string; org_label: string; accounts: { email: string; status?: number; warmup_status?: number; stat_warmup_score?: number; daily_limit?: number }[]; error?: string };
+
+function isoDay(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+// Last full week (Mon–Sun) and the week before it
+function weeklyRanges(): { lastFrom: string; lastTo: string; priorFrom: string; priorTo: string } {
+  const today = new Date();
+  const dow = today.getUTCDay(); // 0=Sun
+  const daysSinceMonday = (dow + 6) % 7;
+  const thisMonday = new Date(today);
+  thisMonday.setUTCDate(today.getUTCDate() - daysSinceMonday);
+  const lastMonday = new Date(thisMonday);
+  lastMonday.setUTCDate(thisMonday.getUTCDate() - 7);
+  const lastSunday = new Date(thisMonday);
+  lastSunday.setUTCDate(thisMonday.getUTCDate() - 1);
+  const priorMonday = new Date(lastMonday);
+  priorMonday.setUTCDate(lastMonday.getUTCDate() - 7);
+  const priorSunday = new Date(lastMonday);
+  priorSunday.setUTCDate(lastMonday.getUTCDate() - 1);
+  return { lastFrom: isoDay(lastMonday), lastTo: isoDay(lastSunday), priorFrom: isoDay(priorMonday), priorTo: isoDay(priorSunday) };
+}
+
+function Delta({ cur, prev, higherBetter = true, suffix = '' }: { cur: number; prev: number; higherBetter?: boolean; suffix?: string }) {
+  if (prev === 0 && cur === 0) return null;
+  const diff = cur - prev;
+  if (diff === 0) return <span className="text-[10px] text-gray-400">= prior wk</span>;
+  const good = higherBetter ? diff > 0 : diff < 0;
+  return (
+    <span className={`text-[10px] font-semibold ${good ? 'text-emerald-600' : 'text-red-500'}`}>
+      {diff > 0 ? '▲' : '▼'} {Math.abs(diff).toLocaleString()}{suffix} vs prior wk
+    </span>
+  );
+}
+
+const BLOCKERS_STORAGE_KEY = 'bd_weekly_blockers_v1';
+
+function WeeklyTab({ campaigns, emails }: { campaigns: NormalizedCampaign[]; emails: NormalizedEmail[] }) {
+  const ranges = useMemo(() => weeklyRanges(), []);
+  const [lastWk, setLastWk] = useState<WeeklyOverride | null>(null);
+  const [priorWk, setPriorWk] = useState<WeeklyOverride | null>(null);
+  const [accounts, setAccounts] = useState<WeeklyOrgAccounts[] | null>(null);
+  const [loadingWk, setLoadingWk] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const [a, b, acc] = await Promise.all([
+          fetch(`/api/instantly/analytics?from=${ranges.lastFrom}&to=${ranges.lastTo}`).then((r) => r.ok ? r.json() : null),
+          fetch(`/api/instantly/analytics?from=${ranges.priorFrom}&to=${ranges.priorTo}`).then((r) => r.ok ? r.json() : null),
+          fetch('/api/instantly/accounts').then((r) => r.ok ? r.json() : null),
+        ]);
+        if (!alive) return;
+        setLastWk(a?.analytics ?? null);
+        setPriorWk(b?.analytics ?? null);
+        setAccounts(acc?.orgs ?? null);
+      } finally {
+        if (alive) setLoadingWk(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, [ranges]);
+
+  // Manual blockers list — persisted in this browser
+  const [blockers, setBlockers] = useState<string[]>([]);
+  const [newBlocker, setNewBlocker] = useState('');
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(BLOCKERS_STORAGE_KEY);
+      if (raw) setBlockers(JSON.parse(raw));
+    } catch { /* ignore */ }
+  }, []);
+  const saveBlockers = (next: string[]) => {
+    setBlockers(next);
+    try { localStorage.setItem(BLOCKERS_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+  };
+
+  // ── Emails for each week ──
+  const lastWkEmails = useMemo(
+    () => emails.filter((e) => e.date_local >= ranges.lastFrom && e.date_local <= ranges.lastTo),
+    [emails, ranges]
+  );
+  const priorWkEmails = useMemo(
+    () => emails.filter((e) => e.date_local >= ranges.priorFrom && e.date_local <= ranges.priorTo),
+    [emails, ranges]
+  );
+
+  const sumSent = (ov: WeeklyOverride | null) => ov ? Object.values(ov).reduce((s, v) => s + v.sent, 0) : 0;
+  const sumBounces = (ov: WeeklyOverride | null) => ov ? Object.values(ov).reduce((s, v) => s + v.bounces, 0) : 0;
+
+  const lastSent = sumSent(lastWk);
+  const priorSent = sumSent(priorWk);
+  const lastBounces = sumBounces(lastWk);
+  const lastBounceRate = lastSent > 0 ? Math.round((lastBounces / lastSent) * 1000) / 10 : 0;
+  const priorBounces = sumBounces(priorWk);
+  const priorBounceRate = priorSent > 0 ? Math.round((priorBounces / priorSent) * 1000) / 10 : 0;
+
+  const lastPos = lastWkEmails.filter((e) => e.is_positive).length;
+  const priorPos = priorWkEmails.filter((e) => e.is_positive).length;
+  const lastMeetings = lastWkEmails.filter((e) => e.final_classification === 'meeting_requested').length;
+  const priorMeetings = priorWkEmails.filter((e) => e.final_classification === 'meeting_requested').length;
+  const lastReplyRate = lastSent > 0 ? Math.round((lastWkEmails.length / lastSent) * 1000) / 10 : 0;
+
+  // ── What's working ──
+  const campaignById = useMemo(() => new Map(campaigns.map((c) => [c.campaign_id, c])), [campaigns]);
+
+  const topCampaigns = useMemo(() => {
+    const posByCampaign = new Map<string, number>();
+    lastWkEmails.forEach((e) => {
+      if (e.is_positive) posByCampaign.set(e.campaign_id, (posByCampaign.get(e.campaign_id) ?? 0) + 1);
+    });
+    return [...posByCampaign.entries()]
+      .map(([id, pos]) => ({ c: campaignById.get(id), pos }))
+      .filter((x): x is { c: NormalizedCampaign; pos: number } => !!x.c)
+      .sort((a, b) => b.pos - a.pos)
+      .slice(0, 5);
+  }, [lastWkEmails, campaignById]);
+
+  const topSectors = useMemo(() => {
+    const m = new Map<string, { replies: number; pos: number }>();
+    lastWkEmails.forEach((e) => {
+      if (!e.sector || e.sector === 'Unmapped') return;
+      const cur = m.get(e.sector) ?? { replies: 0, pos: 0 };
+      cur.replies++;
+      if (e.is_positive) cur.pos++;
+      m.set(e.sector, cur);
+    });
+    return [...m.entries()]
+      .filter(([, v]) => v.replies >= 2)
+      .map(([sector, v]) => ({ sector, ...v, rate: v.pos / v.replies }))
+      .sort((a, b) => b.rate - a.rate)
+      .slice(0, 5);
+  }, [lastWkEmails]);
+
+  // ── Domain health ──
+  type DomainHealth = {
+    domain: string; org: string; total: number; healthy: number;
+    avgScore: number; issues: string[];
+  };
+  const domainHealth = useMemo<DomainHealth[]>(() => {
+    if (!accounts) return [];
+    const byDomain = new Map<string, { org: string; scores: number[]; statuses: number[]; warmups: number[] }>();
+    accounts.forEach((o) => {
+      o.accounts.forEach((a) => {
+        const domain = a.email.split('@')[1] ?? 'unknown';
+        const cur = byDomain.get(domain) ?? { org: o.org_label, scores: [], statuses: [], warmups: [] };
+        cur.scores.push(a.stat_warmup_score ?? 0);
+        cur.statuses.push(a.status ?? 0);
+        cur.warmups.push(a.warmup_status ?? 0);
+        byDomain.set(domain, cur);
+      });
+    });
+    return [...byDomain.entries()].map(([domain, v]) => {
+      const total = v.statuses.length;
+      const healthy = v.statuses.filter((s, i) => s === 1 && v.warmups[i] === 1 && (v.scores[i] || 0) >= 90).length;
+      const avgScore = v.scores.length ? Math.round(v.scores.reduce((s, x) => s + x, 0) / v.scores.length) : 0;
+      const issues: string[] = [];
+      const errorCount = v.statuses.filter((s) => s < 0).length;
+      const pausedCount = v.statuses.filter((s) => s === 2).length;
+      const badWarmup = v.warmups.filter((w) => w < 0).length;
+      const lowScore = v.scores.filter((s) => s > 0 && s < 90).length;
+      if (errorCount > 0) issues.push(`${errorCount} account error${errorCount > 1 ? 's' : ''}`);
+      if (pausedCount > 0) issues.push(`${pausedCount} paused`);
+      if (badWarmup > 0) issues.push(`${badWarmup} warmup issue${badWarmup > 1 ? 's' : ''}`);
+      if (lowScore > 0) issues.push(`${lowScore} low warmup score`);
+      return { domain, org: v.org, total, healthy, avgScore, issues };
+    }).sort((a, b) => (a.issues.length - b.issues.length) || b.avgScore - a.avgScore);
+  }, [accounts]);
+
+  const healthyDomains = domainHealth.filter((d) => d.issues.length === 0);
+  const problemDomains = domainHealth.filter((d) => d.issues.length > 0);
+
+  // ── What's not working ──
+  const highBounceLastWk = useMemo(() => {
+    if (!lastWk) return [];
+    return Object.entries(lastWk)
+      .map(([id, v]) => ({ c: campaignById.get(id), ...v }))
+      .filter((x): x is { c: NormalizedCampaign; sent: number; opens: number; opens_unique: number; bounces: number; unsubscribes: number } => !!x.c && x.sent >= 50)
+      .map((x) => ({ ...x, bounceRate: Math.round((x.bounces / x.sent) * 1000) / 10 }))
+      .filter((x) => x.bounceRate > 5)
+      .sort((a, b) => b.bounceRate - a.bounceRate)
+      .slice(0, 5);
+  }, [lastWk, campaignById]);
+
+  const silentActive = useMemo(() => {
+    const repliedIds = new Set(lastWkEmails.map((e) => e.campaign_id));
+    const sentLastWk = new Set(lastWk ? Object.entries(lastWk).filter(([, v]) => v.sent > 0).map(([id]) => id) : []);
+    return campaigns
+      .filter((c) => (c.campaign_status_num === 1 || c.campaign_status_num === 2))
+      .filter((c) => sentLastWk.has(c.campaign_id) && !repliedIds.has(c.campaign_id))
+      .slice(0, 6);
+  }, [campaigns, lastWkEmails, lastWk]);
+
+  // ── What are we missing (auto-detected) ──
+  const unmappedCampaigns = campaigns.filter((c) => c.sector === 'Unmapped' || !c.sector).length;
+  const orgErrors = accounts?.filter((o) => o.error).map((o) => o.org_label) ?? [];
+
+  // ── Focus recommendations ──
+  const focus = useMemo(() => {
+    const items: { text: string; kind: 'good' | 'warn' | 'urgent' }[] = [];
+    if (lastPos > 0) items.push({ text: `Follow up on ${lastPos} positive repl${lastPos === 1 ? 'y' : 'ies'} from last week — top source: ${topCampaigns[0]?.c.campaign_name ?? 'n/a'}`, kind: 'good' });
+    if (lastMeetings > 0) items.push({ text: `${lastMeetings} meeting request${lastMeetings === 1 ? '' : 's'} came in last week — confirm they are scheduled`, kind: 'good' });
+    problemDomains.slice(0, 3).forEach((d) => items.push({ text: `Fix ${d.domain} (${d.org}): ${d.issues.join(', ')}`, kind: 'urgent' }));
+    highBounceLastWk.slice(0, 2).forEach((x) => items.push({ text: `Review list quality for "${x.c.campaign_name}" — ${x.bounceRate}% bounce last week`, kind: 'urgent' }));
+    if (silentActive.length > 0) items.push({ text: `${silentActive.length} active campaign${silentActive.length === 1 ? '' : 's'} sent last week with zero replies — consider refreshing copy or pausing`, kind: 'warn' });
+    if (topSectors[0]) items.push({ text: `${topSectors[0].sector} converted best last week (${Math.round(topSectors[0].rate * 100)}% positive) — consider scaling that sector`, kind: 'good' });
+    if (lastBounceRate > 3) items.push({ text: `Overall bounce rate was ${lastBounceRate}% last week — audit data sources if this persists`, kind: 'warn' });
+    if (unmappedCampaigns > 0) items.push({ text: `${unmappedCampaigns} campaign${unmappedCampaigns === 1 ? '' : 's'} missing sector mapping — add to campaign-sector-map`, kind: 'warn' });
+    return items;
+  }, [lastPos, lastMeetings, topCampaigns, problemDomains, highBounceLastWk, silentActive, topSectors, lastBounceRate, unmappedCampaigns]);
+
+  const wkLabel = `${ranges.lastFrom} → ${ranges.lastTo}`;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="text-sm text-gray-600">Last full week: <span className="font-semibold text-gray-800">{wkLabel}</span> (Mon–Sun, compared to the week before)</div>
+        {loadingWk && (
+          <div className="flex items-center gap-1.5 text-[11px] text-blue-500">
+            <Loader2 className="h-3 w-3 animate-spin" /> Loading weekly analytics + domain health…
+          </div>
+        )}
+      </div>
+
+      {/* ── 1. How did we perform last week? ── */}
+      <div>
+        <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-2 px-0.5">1 · How did we perform last week?</div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          {[
+            { label: 'Emails Sent', value: lastWk ? fmt(lastSent) : '…', delta: <Delta cur={lastSent} prev={priorSent} /> },
+            { label: 'Replies', value: fmt(lastWkEmails.length), delta: <Delta cur={lastWkEmails.length} prev={priorWkEmails.length} /> },
+            { label: 'Positive Replies', value: fmt(lastPos), delta: <Delta cur={lastPos} prev={priorPos} />, em: true },
+            { label: 'Meetings Requested', value: fmt(lastMeetings), delta: <Delta cur={lastMeetings} prev={priorMeetings} />, em: true },
+            { label: 'Reply Rate', value: lastWk ? `${lastReplyRate}%` : '…', delta: null },
+            { label: 'Bounce Rate', value: lastWk ? `${lastBounceRate}%` : '…', delta: <Delta cur={lastBounceRate} prev={priorBounceRate} higherBetter={false} suffix="pp" />, warn: lastBounceRate > 5 },
+          ].map(({ label, value, delta, em, warn }) => (
+            <div key={label} className={`border rounded-xl p-4 text-center shadow-sm ${warn ? 'bg-red-50 border-red-200' : 'bg-white border-gray-200'}`}>
+              <div className={`text-2xl font-bold tabular-nums ${warn ? 'text-red-600' : em ? 'text-emerald-600' : 'text-gray-900'}`}>{value}</div>
+              <div className="text-[10px] text-gray-500 mt-0.5">{label}</div>
+              <div className="mt-0.5 min-h-[14px]">{delta}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── 2. What's working? ── */}
+      <div>
+        <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-2 px-0.5">2 · What&apos;s working?</div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-white border border-emerald-200 rounded-xl shadow-sm overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-emerald-100 bg-emerald-50 text-xs font-semibold text-emerald-700">Top Campaigns (positive replies last wk)</div>
+            {topCampaigns.length === 0 ? <div className="px-4 py-3 text-xs text-gray-400">No positive replies last week.</div> : (
+              <div className="divide-y divide-gray-50">
+                {topCampaigns.map(({ c, pos }) => (
+                  <div key={c.campaign_id} className="px-3 py-2 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-xs font-medium text-gray-800 truncate" title={c.campaign_name}>{c.campaign_name}</div>
+                      <div className="text-[10px] text-gray-400">{c.sector} · {c.state}</div>
+                    </div>
+                    <span className="text-sm font-bold text-emerald-600 flex-shrink-0">{pos}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50 text-xs font-semibold text-gray-600">Top Sectors (pos. rate last wk, min 2 replies)</div>
+            {topSectors.length === 0 ? <div className="px-4 py-3 text-xs text-gray-400">Not enough reply volume last week.</div> : (
+              <div className="divide-y divide-gray-50">
+                {topSectors.map((s) => (
+                  <div key={s.sector} className="px-3 py-2 flex items-center justify-between gap-2">
+                    <span className="text-xs font-medium text-gray-800 truncate">{s.sector}</span>
+                    <span className="text-xs text-gray-400 flex-shrink-0">{s.pos}/{s.replies} · <span className="font-bold text-emerald-600">{Math.round(s.rate * 100)}%</span></span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50 text-xs font-semibold text-gray-600">Healthy Sending Domains</div>
+            {!accounts ? <div className="px-4 py-3 text-xs text-gray-400">Loading…</div> : healthyDomains.length === 0 ? <div className="px-4 py-3 text-xs text-gray-400">No fully healthy domains found.</div> : (
+              <div className="divide-y divide-gray-50 max-h-56 overflow-y-auto">
+                {healthyDomains.slice(0, 10).map((d) => (
+                  <div key={d.domain} className="px-3 py-1.5 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-xs font-medium text-gray-800 truncate">{d.domain}</div>
+                      <div className="text-[10px] text-gray-400">{d.org} · {d.total} account{d.total > 1 ? 's' : ''}</div>
+                    </div>
+                    <span className="text-xs font-bold text-emerald-600 flex-shrink-0">{d.avgScore}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── 3. What's not working? ── */}
+      <div>
+        <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-2 px-0.5">3 · What&apos;s not working?</div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className={`border rounded-xl shadow-sm overflow-hidden ${problemDomains.length > 0 ? 'border-red-200' : 'border-gray-200'}`}>
+            <div className={`px-4 py-2.5 border-b text-xs font-semibold ${problemDomains.length > 0 ? 'bg-red-50 border-red-100 text-red-700' : 'bg-gray-50 border-gray-100 text-gray-400'}`}>
+              Domain / Account Issues ({problemDomains.length})
+            </div>
+            {!accounts ? <div className="px-4 py-3 bg-white text-xs text-gray-400">Loading…</div> : problemDomains.length === 0 ? <div className="px-4 py-3 bg-white text-xs text-gray-400">All sending domains healthy.</div> : (
+              <div className="divide-y divide-gray-50 bg-white max-h-56 overflow-y-auto">
+                {problemDomains.map((d) => (
+                  <div key={d.domain} className="px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-medium text-gray-800 truncate">{d.domain}</span>
+                      <span className="text-[10px] text-gray-400 flex-shrink-0">{d.org} · score {d.avgScore}</span>
+                    </div>
+                    <div className="text-[10px] text-red-500 mt-0.5">{d.issues.join(' · ')}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className={`border rounded-xl shadow-sm overflow-hidden ${highBounceLastWk.length > 0 ? 'border-red-200' : 'border-gray-200'}`}>
+            <div className={`px-4 py-2.5 border-b text-xs font-semibold ${highBounceLastWk.length > 0 ? 'bg-red-50 border-red-100 text-red-700' : 'bg-gray-50 border-gray-100 text-gray-400'}`}>
+              High Bounce Last Wk ({highBounceLastWk.length})
+            </div>
+            {highBounceLastWk.length === 0 ? <div className="px-4 py-3 bg-white text-xs text-gray-400">No campaigns over 5% bounce last week.</div> : (
+              <div className="divide-y divide-gray-50 bg-white">
+                {highBounceLastWk.map((x) => (
+                  <div key={x.c.campaign_id} className="px-3 py-1.5 flex items-center justify-between gap-2">
+                    <span className="text-xs text-gray-700 truncate" title={x.c.campaign_name}>{x.c.campaign_name}</span>
+                    <span className="text-xs font-bold text-red-600 flex-shrink-0">{x.bounceRate}%</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className={`border rounded-xl shadow-sm overflow-hidden ${silentActive.length > 0 ? 'border-amber-200' : 'border-gray-200'}`}>
+            <div className={`px-4 py-2.5 border-b text-xs font-semibold ${silentActive.length > 0 ? 'bg-amber-50 border-amber-100 text-amber-700' : 'bg-gray-50 border-gray-100 text-gray-400'}`}>
+              Sent Last Wk, Zero Replies ({silentActive.length})
+            </div>
+            {silentActive.length === 0 ? <div className="px-4 py-3 bg-white text-xs text-gray-400">Every campaign that sent got replies.</div> : (
+              <div className="divide-y divide-gray-50 bg-white">
+                {silentActive.map((c) => (
+                  <div key={c.campaign_id} className="px-3 py-1.5 flex items-center justify-between gap-2">
+                    <span className="text-xs text-gray-700 truncate" title={c.campaign_name}>{c.campaign_name}</span>
+                    <span className="text-[10px] text-gray-400 flex-shrink-0">{c.sector}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── 4. What are we missing? ── */}
+      <div>
+        <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-2 px-0.5">4 · What are we missing?</div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50 text-xs font-semibold text-gray-600">Blockers / Requests (add your own)</div>
+            <div className="p-3 space-y-2">
+              <div className="flex gap-2">
+                <input
+                  value={newBlocker}
+                  onChange={(e) => setNewBlocker(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && newBlocker.trim()) {
+                      saveBlockers([...blockers, newBlocker.trim()]);
+                      setNewBlocker('');
+                    }
+                  }}
+                  placeholder="e.g. Waiting on Q3 target list from ops…"
+                  className="flex-1 text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-300"
+                />
+                <button
+                  onClick={() => { if (newBlocker.trim()) { saveBlockers([...blockers, newBlocker.trim()]); setNewBlocker(''); } }}
+                  className="text-xs bg-blue-500 text-white rounded-lg px-3 py-1.5 hover:bg-blue-600"
+                >Add</button>
+              </div>
+              {blockers.length === 0 ? (
+                <div className="text-xs text-gray-400 py-1">No open blockers logged. Saved in this browser.</div>
+              ) : (
+                <div className="space-y-1">
+                  {blockers.map((b, i) => (
+                    <div key={i} className="flex items-center justify-between gap-2 bg-amber-50 border border-amber-100 rounded-lg px-2.5 py-1.5">
+                      <span className="text-xs text-gray-700">{b}</span>
+                      <button onClick={() => saveBlockers(blockers.filter((_, j) => j !== i))} className="text-[10px] text-gray-400 hover:text-red-500 flex-shrink-0">✕ done</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50 text-xs font-semibold text-gray-600">Auto-Detected Gaps</div>
+            <div className="divide-y divide-gray-50">
+              {unmappedCampaigns > 0 && (
+                <div className="px-3 py-2 text-xs text-gray-700">⚠ {unmappedCampaigns} campaign{unmappedCampaigns === 1 ? '' : 's'} without sector mapping</div>
+              )}
+              {orgErrors.map((o) => (
+                <div key={o} className="px-3 py-2 text-xs text-red-600">⚠ Account data unavailable for {o}</div>
+              ))}
+              {unmappedCampaigns === 0 && orgErrors.length === 0 && (
+                <div className="px-3 py-3 text-xs text-gray-400">No data gaps detected — all campaigns mapped, all orgs reporting.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── 5. Where should the team focus this week? ── */}
+      <div>
+        <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-2 px-0.5">5 · Where should the team focus this week?</div>
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          {focus.length === 0 ? <div className="px-4 py-4 text-xs text-gray-400">Waiting on data…</div> : (
+            <div className="divide-y divide-gray-50">
+              {focus.map((f, i) => (
+                <div key={i} className="px-4 py-2.5 flex items-start gap-2.5">
+                  <span className={`mt-0.5 h-2 w-2 rounded-full flex-shrink-0 ${f.kind === 'urgent' ? 'bg-red-500' : f.kind === 'warn' ? 'bg-amber-400' : 'bg-emerald-500'}`} />
+                  <span className="text-xs text-gray-700">{f.text}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -2809,6 +3250,7 @@ export default function BDDashboard() {
         ) : !bd.data ? null : (
           <>
             {tab === 'overview'  && <OverviewTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} stats={bd.stats} analyticsAvailable={bd.stats.analyticsAvailable} analyticsDateFiltered={bd.analyticsDateFiltered} isFiltered={isFiltered} campaignStats={bd.campaignStats} />}
+            {tab === 'weekly'    && <WeeklyTab campaigns={bd.allCampaigns} emails={bd.allEmails} />}
             {tab === 'sectors'   && <SectorsTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} isFiltered={isFiltered} campaignStats={bd.campaignStats} />}
             {tab === 'states'    && <StatesTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} isFiltered={isFiltered} />}
             {tab === 'compare'   && <CompareTab filteredCampaigns={bd.compareCampaigns} filteredEmails={bd.compareEmails} sectorA={sectorA} setSectorA={setSectorA} sectorB={sectorB} setSectorB={setSectorB} compareMode={compareMode} setCompareMode={setCompareMode} ownerA={ownerA} setOwnerA={setOwnerA} ownerB={ownerB} setOwnerB={setOwnerB} />}
