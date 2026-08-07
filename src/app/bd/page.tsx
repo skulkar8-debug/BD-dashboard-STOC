@@ -779,7 +779,7 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
       m.set(e.sector, cur);
     });
     return [...m.entries()]
-      .filter(([, v]) => v.replies >= 2)
+      .filter(([, v]) => v.replies >= 2 && v.pos > 0)
       .map(([sector, v]) => ({ sector, ...v, rate: v.pos / v.replies }))
       .sort((a, b) => b.rate - a.rate)
       .slice(0, 5);
@@ -907,8 +907,14 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
     if (lastMeetings > 0) items.push({ text: `${lastMeetings} meeting request${lastMeetings === 1 ? '' : 's'} came in last week — confirm they are scheduled`, kind: 'good' });
     problemDomains.slice(0, 3).forEach((d) => items.push({ text: `Fix ${d.domain} (${d.org}): ${d.issues.join(', ')}`, kind: 'urgent' }));
     highBounceLastWk.slice(0, 2).forEach((x) => items.push({ text: `Review list quality for "${x.c.campaign_name}" — ${x.bounceRate}% bounce last week`, kind: 'urgent' }));
-    if (silentActive.length > 0) items.push({ text: `${silentActive.length} active campaign${silentActive.length === 1 ? '' : 's'} sent last week with zero replies — consider refreshing copy or pausing`, kind: 'warn' });
-    if (topSectors[0]) items.push({ text: `${topSectors[0].sector} converted best last week (${Math.round(topSectors[0].rate * 100)}% positive) — consider scaling that sector`, kind: 'good' });
+    if (silentActive.length > 0) {
+      const names = silentActive.slice(0, 3).map((c) => `"${c.campaign_name}"`).join(', ');
+      const more = silentActive.length > 3 ? ` and ${silentActive.length - 3} more` : '';
+      items.push({ text: `${silentActive.length} active campaign${silentActive.length === 1 ? '' : 's'} sent last week with zero replies — ${names}${more}. Consider refreshing copy or pausing.`, kind: 'warn' });
+    }
+    // Only recommend scaling a sector that actually produced positives
+    const bestSector = topSectors.find((s) => s.pos > 0);
+    if (bestSector) items.push({ text: `${bestSector.sector} converted best last week (${bestSector.pos} positive, ${Math.round(bestSector.rate * 100)}% of replies) — consider scaling that sector`, kind: 'good' });
     if (lastBounceRate > 3) items.push({ text: `Overall bounce rate was ${lastBounceRate}% last week — audit data sources if this persists`, kind: 'warn' });
     if (unmappedCampaigns > 0) items.push({ text: `${unmappedCampaigns} campaign${unmappedCampaigns === 1 ? '' : 's'} missing sector mapping — add to campaign-sector-map`, kind: 'warn' });
     return items;
@@ -1112,7 +1118,7 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
 
           <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
             <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50 text-xs font-semibold text-gray-600">Top Sectors (pos. rate last wk, min 2 replies)</div>
-            {topSectors.length === 0 ? <div className="px-4 py-3 text-xs text-gray-400">Not enough reply volume last week.</div> : (
+            {topSectors.length === 0 ? <div className="px-4 py-3 text-xs text-gray-400">No sector produced positive replies last week (min 2 replies).</div> : (
               <div className="divide-y divide-gray-50">
                 {topSectors.map((s) => (
                   <div key={s.sector} className="px-3 py-2 flex items-center justify-between gap-2">
