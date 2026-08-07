@@ -789,7 +789,10 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
   // not just Instantly's self-reported warmup score. A domain with 1,000 sends
   // and zero replies is unhealthy no matter what its warmup score says.
   type DomainHealth = {
-    domain: string; org: string; total: number;
+    domain: string;        // brand label, e.g. "mclerranandassociates (2 alias domains)"
+    domains: string[];     // all alias domains in this brand cluster
+    sectors: string[];     // sectors this brand sends for (from campaign attribution)
+    org: string; total: number;
     avgScore: number; issues: string[];
     sent: number; replies: number; bounces: number; bounceRate: number; replyRate: number;
   };
@@ -803,23 +806,37 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
   const domainHealth = useMemo<DomainHealth[]>(() => {
     if (!filteredAccounts) return [];
 
-    // 1. Warmup/status signals per domain from accounts
-    const byDomain = new Map<string, { org: string; scores: number[]; statuses: number[]; warmups: number[] }>();
+    // Alias domains (trymclerran…, mymclerran…) are the same brand — cluster them.
+    // Brand key = registrable core with common marketing prefixes stripped.
+    const PREFIXES = ['try', 'my', 'get', 'go', 'meet', 'hello', 'use', 'with', 'join', 'team', 'the', 'talk', 'ask', 'contact'];
+    const brandOf = (domain: string): string => {
+      const core = domain.split('.')[0]?.toLowerCase() ?? domain;
+      for (const p of PREFIXES) {
+        if (core.startsWith(p) && core.length - p.length >= 5) return core.slice(p.length);
+      }
+      return core;
+    };
+
+    // 1. Warmup/status signals per brand from accounts (org + brand is the grouping key)
+    const byBrand = new Map<string, { org: string; domains: Set<string>; scores: number[]; statuses: number[]; warmups: number[] }>();
+    const domainToBrandKey = new Map<string, string>();
     filteredAccounts.forEach((o) => {
       o.accounts.forEach((a) => {
         const domain = a.email.split('@')[1] ?? 'unknown';
-        const cur = byDomain.get(domain) ?? { org: o.org_label, scores: [], statuses: [], warmups: [] };
+        const key = `${o.org_label}|||${brandOf(domain)}`;
+        domainToBrandKey.set(domain, key);
+        const cur = byBrand.get(key) ?? { org: o.org_label, domains: new Set<string>(), scores: [], statuses: [], warmups: [] };
+        cur.domains.add(domain);
         cur.scores.push(a.stat_warmup_score ?? 0);
         cur.statuses.push(a.status ?? 0);
         cur.warmups.push(a.warmup_status ?? 0);
-        byDomain.set(domain, cur);
+        byBrand.set(key, cur);
       });
     });
 
-    // 2. Attribute last week's outcomes to domains via each campaign's sending accounts.
-    // A campaign's sent/bounces are split evenly across its sending domains; replies
-    // counted per domain the same way.
-    const outcomes = new Map<string, { sent: number; replies: number; bounces: number }>();
+    // 2. Attribute last week's outcomes + sectors to brands via campaign sending accounts.
+    // Splitting across brands (not raw domains) means alias domains don't dilute each other.
+    const outcomes = new Map<string, { sent: number; replies: number; bounces: number; sectors: Set<string> }>();
     const repliesByCampaign = new Map<string, number>();
     lastWkEmails.forEach((e) => {
       repliesByCampaign.set(e.campaign_id, (repliesByCampaign.get(e.campaign_id) ?? 0) + 1);
@@ -828,22 +845,30 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
       const cur = lastWk?.[c.campaign_id];
       const replies = repliesByCampaign.get(c.campaign_id) ?? 0;
       if (!cur && replies === 0) return;
-      const domains = [...new Set(c.sending_accounts.map((a) => a.split('@')[1]).filter(Boolean))];
-      if (domains.length === 0) return;
-      const share = 1 / domains.length;
-      domains.forEach((d) => {
-        const o = outcomes.get(d) ?? { sent: 0, replies: 0, bounces: 0 };
+      const brandKeys = [...new Set(
+        c.sending_accounts
+          .map((a) => a.split('@')[1])
+          .filter((d): d is string => !!d)
+          .map((d) => domainToBrandKey.get(d) ?? `${c.org_label}|||${brandOf(d)}`)
+      )];
+      if (brandKeys.length === 0) return;
+      const share = 1 / brandKeys.length;
+      brandKeys.forEach((k) => {
+        const o = outcomes.get(k) ?? { sent: 0, replies: 0, bounces: 0, sectors: new Set<string>() };
         o.sent += (cur?.sent ?? 0) * share;
         o.bounces += (cur?.bounces ?? 0) * share;
         o.replies += replies * share;
-        outcomes.set(d, o);
+        if (c.sector && c.sector !== 'Unmapped') o.sectors.add(c.sector);
+        outcomes.set(k, o);
       });
     });
 
-    return [...byDomain.entries()].map(([domain, v]) => {
+    const anyOutcomeData = [...outcomes.values()].some((o) => o.sent > 0);
+
+    return [...byBrand.entries()].map(([key, v]) => {
       const total = v.statuses.length;
       const avgScore = v.scores.length ? Math.round(v.scores.reduce((s, x) => s + x, 0) / v.scores.length) : 0;
-      const out = outcomes.get(domain) ?? { sent: 0, replies: 0, bounces: 0 };
+      const out = outcomes.get(key) ?? { sent: 0, replies: 0, bounces: 0, sectors: new Set<string>() };
       const sent = Math.round(out.sent);
       const replies = Math.round(out.replies);
       const bounces = Math.round(out.bounces);
@@ -851,10 +876,13 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
       const replyRate = sent > 0 ? Math.round((replies / sent) * 1000) / 10 : 0;
 
       const issues: string[] = [];
-      // Outcome-based symptoms FIRST — these are the diagnostic signals
-      if (sent >= 200 && replies === 0) issues.push(`${sent.toLocaleString()} sent, ZERO replies — possible spam placement`);
-      else if (sent >= 500 && replyRate < 0.3) issues.push(`reply rate ${replyRate}% on ${sent.toLocaleString()} sent — very low`);
-      if (sent >= 100 && bounceRate > 3) issues.push(`${bounceRate}% bounce`);
+      // Outcome-based symptoms FIRST — only when we actually have outcome data,
+      // so we never claim "zero replies" just because attribution data is missing
+      if (anyOutcomeData) {
+        if (sent >= 200 && replies === 0) issues.push(`${sent.toLocaleString()} sent, ZERO replies — possible spam placement`);
+        else if (sent >= 500 && replyRate < 0.3) issues.push(`reply rate ${replyRate}% on ${sent.toLocaleString()} sent — very low`);
+        if (sent >= 100 && bounceRate > 3) issues.push(`${bounceRate}% bounce`);
+      }
       // Infra signals from Instantly account status
       const errorCount = v.statuses.filter((s) => s < 0).length;
       const pausedCount = v.statuses.filter((s) => s === 2).length;
@@ -864,8 +892,14 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
       if (pausedCount > 0) issues.push(`${pausedCount} paused`);
       if (badWarmup > 0) issues.push(`${badWarmup} warmup issue${badWarmup > 1 ? 's' : ''}`);
       if (lowScore > 0) issues.push(`${lowScore} low warmup score`);
-      return { domain, org: v.org, total, avgScore, issues, sent, replies, bounces, bounceRate, replyRate };
-    }).sort((a, b) => (b.issues.length - a.issues.length) || b.sent - a.sent);
+      const domains = [...v.domains].sort();
+      return {
+        domain: domains.length > 1 ? `${brandOf(domains[0])} (${domains.length} alias domains)` : domains[0],
+        domains,
+        sectors: [...out.sectors].sort(),
+        org: v.org, total, avgScore, issues, sent, replies, bounces, bounceRate, replyRate,
+      };
+    }).sort((a, b) => a.org.localeCompare(b.org) || (b.issues.length - a.issues.length) || b.sent - a.sent);
   }, [filteredAccounts, campaigns, lastWk, lastWkEmails]);
 
   // Healthy = no issues AND actually produced replies (or didn't send enough to judge)
@@ -1135,10 +1169,13 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
             {!accounts ? <div className="px-4 py-3 text-xs text-gray-400">Loading…</div> : healthyDomains.length === 0 ? <div className="px-4 py-3 text-xs text-gray-400">No fully healthy domains found.</div> : (
               <div className="divide-y divide-gray-50 max-h-56 overflow-y-auto">
                 {healthyDomains.slice(0, 10).map((d) => (
-                  <div key={d.domain} className="px-3 py-1.5 flex items-center justify-between gap-2">
+                  <div key={`${d.org}|${d.domain}`} className="px-3 py-1.5 flex items-center justify-between gap-2">
                     <div className="min-w-0">
-                      <div className="text-xs font-medium text-gray-800 truncate">{d.domain}</div>
-                      <div className="text-[10px] text-gray-400">{d.org} · {d.total} acct{d.total > 1 ? 's' : ''} · score {d.avgScore}</div>
+                      <div className="text-xs font-medium text-gray-800 truncate" title={d.domains.join(', ')}>{d.domain}</div>
+                      <div className="text-[10px] text-gray-400 truncate">
+                        {d.org} · {d.total} acct{d.total > 1 ? 's' : ''} · score {d.avgScore}
+                        {d.sectors.length > 0 && <> · {d.sectors.join(', ')}</>}
+                      </div>
                     </div>
                     <div className="text-right flex-shrink-0">
                       <div className="text-xs font-bold text-emerald-600">{d.replies} repl</div>
@@ -1163,11 +1200,18 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
             {!accounts ? <div className="px-4 py-3 bg-white text-xs text-gray-400">Loading…</div> : problemDomains.length === 0 ? <div className="px-4 py-3 bg-white text-xs text-gray-400">All sending domains healthy.</div> : (
               <div className="divide-y divide-gray-50 bg-white max-h-56 overflow-y-auto">
                 {problemDomains.map((d) => (
-                  <div key={d.domain} className="px-3 py-2">
+                  <div key={`${d.org}|${d.domain}`} className="px-3 py-2">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-medium text-gray-800 truncate">{d.domain}</span>
+                      <span className="text-xs font-medium text-gray-800 truncate" title={d.domains.join(', ')}>{d.domain}</span>
                       <span className="text-[10px] text-gray-400 flex-shrink-0">{d.org} · {d.sent.toLocaleString()} sent · {d.replies} repl · score {d.avgScore}</span>
                     </div>
+                    {(d.sectors.length > 0 || d.domains.length > 1) && (
+                      <div className="text-[10px] text-gray-400 mt-0.5 truncate">
+                        {d.domains.length > 1 && <span>{d.domains.join(', ')}</span>}
+                        {d.domains.length > 1 && d.sectors.length > 0 && ' · '}
+                        {d.sectors.length > 0 && <span>Sectors: {d.sectors.join(', ')}</span>}
+                      </div>
+                    )}
                     <div className="text-[10px] text-red-500 mt-0.5">{d.issues.join(' · ')}</div>
                   </div>
                 ))}
