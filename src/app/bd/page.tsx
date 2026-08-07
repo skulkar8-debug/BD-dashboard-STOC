@@ -662,7 +662,28 @@ function Delta({ cur, prev, higherBetter = true, suffix = '' }: { cur: number; p
 
 const BLOCKERS_STORAGE_KEY = 'bd_weekly_blockers_v1';
 
-function WeeklyTab({ campaigns, emails }: { campaigns: NormalizedCampaign[]; emails: NormalizedEmail[] }) {
+function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { campaigns: NormalizedCampaign[]; emails: NormalizedEmail[]; filters: FilterState }) {
+  // Apply dimension filters from the FilterBar (org/sector/owner/state/campaign) but NOT
+  // the date filter — this tab always reports on the last full Mon–Sun week.
+  const campaigns = useMemo(() => allCampaigns.filter((c) => {
+    if (filters.orgs.length > 0 && !filters.orgs.includes(c.org_id)) return false;
+    if (filters.sectors.length > 0 && !filters.sectors.includes(c.sector)) return false;
+    if (filters.bd_owners.length > 0 && !filters.bd_owners.includes(c.bd_owner)) return false;
+    if (filters.state && c.state !== filters.state) return false;
+    if (filters.campaigns.length > 0 && !filters.campaigns.includes(c.campaign_id)) return false;
+    if (filters.campaign_status && c.campaign_status !== filters.campaign_status) return false;
+    return true;
+  }), [allCampaigns, filters]);
+
+  const emails = useMemo(() => allEmails.filter((e) => {
+    if (filters.orgs.length > 0 && !filters.orgs.includes(e.org_id)) return false;
+    if (filters.sectors.length > 0 && !filters.sectors.includes(e.sector)) return false;
+    if (filters.bd_owners.length > 0 && !filters.bd_owners.includes(e.bd_owner)) return false;
+    if (filters.state && e.state !== filters.state) return false;
+    if (filters.campaigns.length > 0 && !filters.campaigns.includes(e.campaign_id)) return false;
+    return true;
+  }), [allEmails, filters]);
+
   const ranges = useMemo(() => weeklyRanges(), []);
   const [lastWk, setLastWk] = useState<WeeklyOverride | null>(null);
   const [priorWk, setPriorWk] = useState<WeeklyOverride | null>(null);
@@ -713,8 +734,12 @@ function WeeklyTab({ campaigns, emails }: { campaigns: NormalizedCampaign[]; ema
     [emails, ranges]
   );
 
-  const sumSent = (ov: WeeklyOverride | null) => ov ? Object.values(ov).reduce((s, v) => s + v.sent, 0) : 0;
-  const sumBounces = (ov: WeeklyOverride | null) => ov ? Object.values(ov).reduce((s, v) => s + v.bounces, 0) : 0;
+  // Only count campaigns that survive the dimension filters
+  const filteredIds = useMemo(() => new Set(campaigns.map((c) => c.campaign_id)), [campaigns]);
+  const sumSent = (ov: WeeklyOverride | null) =>
+    ov ? Object.entries(ov).reduce((s, [id, v]) => filteredIds.has(id) ? s + v.sent : s, 0) : 0;
+  const sumBounces = (ov: WeeklyOverride | null) =>
+    ov ? Object.entries(ov).reduce((s, [id, v]) => filteredIds.has(id) ? s + v.bounces : s, 0) : 0;
 
   const lastSent = sumSent(lastWk);
   const priorSent = sumSent(priorWk);
@@ -837,6 +862,77 @@ function WeeklyTab({ campaigns, emails }: { campaigns: NormalizedCampaign[]; ema
     return items;
   }, [lastPos, lastMeetings, topCampaigns, problemDomains, highBounceLastWk, silentActive, topSectors, lastBounceRate, unmappedCampaigns]);
 
+  // ── Org → Sector → State breakdown (mirrors the weekly email report) ──
+  type SectorRow = {
+    key: string; org: string; sector: string;
+    sent: number; priorSent: number; replies: number; positive: number; bounces: number;
+    states: { state: string; sent: number; replies: number; positive: number; bounces: number }[];
+  };
+  const orgSectorRows = useMemo<SectorRow[]>(() => {
+    const rows = new Map<string, SectorRow>();
+    const stateAgg = new Map<string, Map<string, { sent: number; replies: number; positive: number; bounces: number }>>();
+
+    const rowFor = (org: string, sector: string): SectorRow => {
+      const key = `${org}|||${sector}`;
+      let r = rows.get(key);
+      if (!r) {
+        r = { key, org, sector, sent: 0, priorSent: 0, replies: 0, positive: 0, bounces: 0, states: [] };
+        rows.set(key, r);
+        stateAgg.set(key, new Map());
+      }
+      return r;
+    };
+    const stateFor = (key: string, state: string) => {
+      const m = stateAgg.get(key)!;
+      let s = m.get(state);
+      if (!s) { s = { sent: 0, replies: 0, positive: 0, bounces: 0 }; m.set(state, s); }
+      return s;
+    };
+
+    // Sent/bounces per campaign from the date-filtered analytics overlay
+    campaigns.forEach((c) => {
+      const cur = lastWk?.[c.campaign_id];
+      const prior = priorWk?.[c.campaign_id];
+      if (!cur && !prior) return;
+      const r = rowFor(c.org_label, c.sector || 'Unmapped');
+      r.sent += cur?.sent ?? 0;
+      r.priorSent += prior?.sent ?? 0;
+      r.bounces += cur?.bounces ?? 0;
+      if (cur && (cur.sent > 0 || cur.bounces > 0)) {
+        const s = stateFor(r.key, c.state || '—');
+        s.sent += cur.sent;
+        s.bounces += cur.bounces;
+      }
+    });
+
+    // Replies/positives from last week's emails
+    lastWkEmails.forEach((e) => {
+      const r = rowFor(e.org_label, e.sector || 'Unmapped');
+      r.replies++;
+      if (e.is_positive) r.positive++;
+      const s = stateFor(r.key, e.state || '—');
+      s.replies++;
+      if (e.is_positive) s.positive++;
+    });
+
+    return [...rows.values()]
+      .filter((r) => r.sent > 0 || r.replies > 0 || r.priorSent > 0)
+      .map((r) => ({
+        ...r,
+        states: [...stateAgg.get(r.key)!.entries()]
+          .map(([state, v]) => ({ state, ...v }))
+          .sort((a, b) => b.sent - a.sent),
+      }))
+      .sort((a, b) => a.org.localeCompare(b.org) || b.sent - a.sent);
+  }, [campaigns, lastWk, priorWk, lastWkEmails]);
+
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const toggleRow = (k: string) => setExpandedRows((s) => {
+    const n = new Set(s);
+    if (n.has(k)) n.delete(k); else n.add(k);
+    return n;
+  });
+
   const wkLabel = `${ranges.lastFrom} → ${ranges.lastTo}`;
 
   return (
@@ -848,6 +944,76 @@ function WeeklyTab({ campaigns, emails }: { campaigns: NormalizedCampaign[]; ema
             <Loader2 className="h-3 w-3 animate-spin" /> Loading weekly analytics + domain health…
           </div>
         )}
+      </div>
+
+      {/* ── Performance by Org & Sector (mirrors the weekly email report) ── */}
+      <div>
+        <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-2 px-0.5">Performance by Org &amp; Sector — Last Week</div>
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-gray-400 text-[10px] uppercase bg-gray-50 border-b border-gray-100">
+                  <th className="text-left px-3 py-2">Org / Sector</th>
+                  <th className="text-right px-3 py-2">Sent</th>
+                  <th className="text-right px-3 py-2" title="Sent this week vs prior week">vs Prior Wk</th>
+                  <th className="text-right px-3 py-2">Replies</th>
+                  <th className="text-right px-3 py-2">Interested</th>
+                  <th className="text-right px-3 py-2">Bounces</th>
+                  <th className="text-right px-3 py-2">Bounce %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loadingWk && orgSectorRows.length === 0 ? (
+                  <tr><td colSpan={7} className="px-3 py-4 text-center text-gray-400">Loading weekly analytics…</td></tr>
+                ) : orgSectorRows.length === 0 ? (
+                  <tr><td colSpan={7} className="px-3 py-4 text-center text-gray-400">No activity last week in the current filter.</td></tr>
+                ) : orgSectorRows.map((r) => {
+                  const open = expandedRows.has(r.key);
+                  const delta = r.sent - r.priorSent;
+                  return (
+                    <React.Fragment key={r.key}>
+                      <tr className="border-t border-gray-50 hover:bg-gray-50 cursor-pointer" onClick={() => toggleRow(r.key)}>
+                        <td className="px-3 py-2 font-medium text-gray-800">
+                          <span className="inline-flex items-center gap-1.5">
+                            {open ? <ChevronDown className="h-3 w-3 text-gray-400" /> : <ChevronRight className="h-3 w-3 text-gray-400" />}
+                            <span className="text-gray-400">{r.org}</span>
+                            <span>·</span>
+                            <span>{r.sector}</span>
+                          </span>
+                        </td>
+                        <td className="text-right px-3 py-2 font-semibold tabular-nums">{fmt(r.sent)}</td>
+                        <td className={`text-right px-3 py-2 tabular-nums text-[11px] ${delta > 0 ? 'text-emerald-600' : delta < 0 ? 'text-red-500' : 'text-gray-400'}`}>
+                          {r.priorSent === 0 && r.sent === 0 ? '—' : `${delta > 0 ? '+' : ''}${fmt(delta)}`}
+                        </td>
+                        <td className="text-right px-3 py-2 tabular-nums">{fmt(r.replies)}</td>
+                        <td className="text-right px-3 py-2 tabular-nums font-semibold text-emerald-600">{fmt(r.positive)}</td>
+                        <td className="text-right px-3 py-2 tabular-nums">{fmt(r.bounces)}</td>
+                        <td className={`text-right px-3 py-2 tabular-nums ${r.sent > 0 && (r.bounces / r.sent) * 100 > 5 ? 'text-red-600 font-semibold' : 'text-gray-500'}`}>
+                          {r.sent > 0 ? `${Math.round((r.bounces / r.sent) * 1000) / 10}%` : '—'}
+                        </td>
+                      </tr>
+                      {open && r.states.map((s) => (
+                        <tr key={`${r.key}|${s.state}`} className="border-t border-gray-50 bg-gray-50/50">
+                          <td className="pl-10 pr-3 py-1.5 text-gray-500">{s.state}</td>
+                          <td className="text-right px-3 py-1.5 tabular-nums text-gray-600">{fmt(s.sent)}</td>
+                          <td className="text-right px-3 py-1.5"></td>
+                          <td className="text-right px-3 py-1.5 tabular-nums text-gray-600">{fmt(s.replies)}</td>
+                          <td className="text-right px-3 py-1.5 tabular-nums text-emerald-600">{fmt(s.positive)}</td>
+                          <td className="text-right px-3 py-1.5 tabular-nums text-gray-600">{fmt(s.bounces)}</td>
+                          <td className="text-right px-3 py-1.5 tabular-nums text-gray-400">{s.sent > 0 ? `${Math.round((s.bounces / s.sent) * 1000) / 10}%` : '—'}</td>
+                        </tr>
+                      ))}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="px-3 py-1.5 border-t border-gray-100 text-[10px] text-gray-400">
+            Click a row to expand by state. Sent/bounces are date-filtered analytics; replies/interested from the email pull. State-level sent is attributed via each campaign&apos;s mapped state.
+          </div>
+        </div>
       </div>
 
       {/* ── 1. How did we perform last week? ── */}
@@ -3250,7 +3416,7 @@ export default function BDDashboard() {
         ) : !bd.data ? null : (
           <>
             {tab === 'overview'  && <OverviewTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} stats={bd.stats} analyticsAvailable={bd.stats.analyticsAvailable} analyticsDateFiltered={bd.analyticsDateFiltered} isFiltered={isFiltered} campaignStats={bd.campaignStats} />}
-            {tab === 'weekly'    && <WeeklyTab campaigns={bd.allCampaigns} emails={bd.allEmails} />}
+            {tab === 'weekly'    && <WeeklyTab campaigns={bd.allCampaigns} emails={bd.allEmails} filters={bd.filters} />}
             {tab === 'sectors'   && <SectorsTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} isFiltered={isFiltered} campaignStats={bd.campaignStats} />}
             {tab === 'states'    && <StatesTab campaigns={bd.filteredCampaigns} emails={bd.filteredEmails} isFiltered={isFiltered} />}
             {tab === 'compare'   && <CompareTab filteredCampaigns={bd.compareCampaigns} filteredEmails={bd.compareEmails} sectorA={sectorA} setSectorA={setSectorA} sectorB={sectorB} setSectorB={setSectorB} compareMode={compareMode} setCompareMode={setCompareMode} ownerA={ownerA} setOwnerA={setOwnerA} ownerB={ownerB} setOwnerB={setOwnerB} />}
