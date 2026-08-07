@@ -307,6 +307,7 @@ export function normalizeEmail(
     from_email: email.from_address_email,
     from_name: fromJson?.name ?? '',
     to_emails: toEmails,
+    eaccount: email.eaccount ?? '',
     lead_id: email.lead ?? '',
     thread_id: email.thread_id ?? '',
     is_auto_reply:

@@ -918,6 +918,79 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
     .filter((d) => d.issues.length > 0)
     .sort((a, b) => (Number(b.sent > 0) - Number(a.sent > 0)) || b.sent - a.sent || (b.issues.length - a.issues.length));
 
+  // ── Per-account performance — which sending emails ARE and AREN'T working ──
+  type AccountPerf = {
+    account: string; org: string; domain: string; sectors: string[];
+    estSent: number; replies: number; positive: number;
+    score: number; statusIssue: string;
+  };
+  const accountPerf = useMemo<AccountPerf[]>(() => {
+    const m = new Map<string, AccountPerf & { sectorSet: Set<string> }>();
+
+    const entryFor = (account: string, org: string) => {
+      let e = m.get(account);
+      if (!e) {
+        e = {
+          account, org, domain: account.split('@')[1] ?? '', sectorSet: new Set<string>(),
+          sectors: [], estSent: 0, replies: 0, positive: 0, score: 0, statusIssue: '',
+        };
+        m.set(account, e);
+      }
+      return e;
+    };
+
+    // Seed from accounts API (warmup score + status)
+    (filteredAccounts ?? []).forEach((o) => {
+      o.accounts.forEach((a) => {
+        const e = entryFor(a.email, o.org_label);
+        e.score = a.stat_warmup_score ?? 0;
+        if ((a.status ?? 0) < 0) e.statusIssue = 'account error';
+        else if (a.status === 2) e.statusIssue = 'paused';
+        else if ((a.warmup_status ?? 0) < 0) e.statusIssue = 'warmup issue';
+      });
+    });
+
+    // Estimated sent per account: campaign's last-week sent split across its sending accounts
+    campaigns.forEach((c) => {
+      const cur = lastWk?.[c.campaign_id];
+      if (!cur || cur.sent === 0 || c.sending_accounts.length === 0) return;
+      const share = cur.sent / c.sending_accounts.length;
+      c.sending_accounts.forEach((a) => {
+        const e = entryFor(a, c.org_label);
+        e.estSent += share;
+        if (c.sector && c.sector !== 'Unmapped') e.sectorSet.add(c.sector);
+      });
+    });
+
+    // Exact reply attribution via eaccount on each reply
+    lastWkEmails.forEach((em) => {
+      if (!em.eaccount) return;
+      const e = entryFor(em.eaccount, em.org_label);
+      e.replies++;
+      if (em.is_positive) e.positive++;
+      if (em.sector && em.sector !== 'Unmapped') e.sectorSet.add(em.sector);
+    });
+
+    return [...m.values()].map((e) => ({
+      ...e,
+      estSent: Math.round(e.estSent),
+      sectors: [...e.sectorSet].sort(),
+    }));
+  }, [filteredAccounts, campaigns, lastWk, lastWkEmails]);
+
+  const hasEaccountData = useMemo(() => lastWkEmails.some((e) => e.eaccount), [lastWkEmails]);
+  const topAccounts = useMemo(
+    () => [...accountPerf].filter((a) => a.replies > 0).sort((a, b) => b.positive - a.positive || b.replies - a.replies).slice(0, 10),
+    [accountPerf]
+  );
+  const silentAccounts = useMemo(
+    () => [...accountPerf]
+      .filter((a) => a.estSent >= 50 && a.replies === 0)
+      .sort((a, b) => b.estSent - a.estSent)
+      .slice(0, 12),
+    [accountPerf]
+  );
+
   // ── What's not working ──
   const highBounceLastWk = useMemo(() => {
     if (!lastWk) return [];
@@ -1269,6 +1342,67 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
               </div>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* ── Sending account performance — individual emails doing well / poorly ── */}
+      <div>
+        <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-2 px-0.5">Sending Account Performance — Last Week</div>
+        {!hasEaccountData && lastWkEmails.length > 0 ? (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs text-amber-700">
+            Reply-to-account attribution needs a data refresh — hit Refresh (top right) to repull emails with sending-account info.
+          </div>
+        ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-white border border-emerald-200 rounded-xl shadow-sm overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-emerald-100 bg-emerald-50 text-xs font-semibold text-emerald-700">Accounts Producing Replies ({topAccounts.length})</div>
+            {topAccounts.length === 0 ? <div className="px-4 py-3 text-xs text-gray-400">No replies attributed to accounts last week.</div> : (
+              <div className="divide-y divide-gray-50 max-h-72 overflow-y-auto">
+                {topAccounts.map((a) => (
+                  <div key={a.account} className="px-3 py-2 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-xs font-medium text-gray-800 truncate">{a.account}</div>
+                      <div className="text-[10px] text-gray-400 truncate">
+                        {a.org}{a.sectors.length > 0 && <> · {a.sectors.join(', ')}</>}{a.estSent > 0 && <> · ~{fmt(a.estSent)} sent</>}
+                      </div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <div className="text-xs"><span className="font-bold text-emerald-600">{a.positive} pos</span> <span className="text-gray-400">/ {a.replies} repl</span></div>
+                      {a.statusIssue && <div className="text-[10px] text-red-500">{a.statusIssue}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className={`border rounded-xl shadow-sm overflow-hidden ${silentAccounts.length > 0 ? 'border-red-200' : 'border-gray-200'}`}>
+            <div className={`px-4 py-2.5 border-b text-xs font-semibold ${silentAccounts.length > 0 ? 'bg-red-50 border-red-100 text-red-700' : 'bg-gray-50 border-gray-100 text-gray-400'}`}>
+              Sending but Silent — est. 50+ sent, zero replies ({silentAccounts.length})
+            </div>
+            {silentAccounts.length === 0 ? <div className="px-4 py-3 bg-white text-xs text-gray-400">No high-volume silent accounts.</div> : (
+              <div className="divide-y divide-gray-50 bg-white max-h-72 overflow-y-auto">
+                {silentAccounts.map((a) => (
+                  <div key={a.account} className="px-3 py-2 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-xs font-medium text-gray-800 truncate">{a.account}</div>
+                      <div className="text-[10px] text-gray-400 truncate">
+                        {a.org}{a.sectors.length > 0 && <> · {a.sectors.join(', ')}</>} · warmup {a.score || '—'}
+                      </div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <div className="text-xs font-bold text-red-600">~{fmt(a.estSent)} sent · 0 repl</div>
+                      {a.statusIssue && <div className="text-[10px] text-red-500">{a.statusIssue}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        )}
+        <div className="text-[10px] text-gray-400 mt-1.5 px-0.5">
+          Replies are attributed exactly (each reply lands in a specific sending account). Sent per account is estimated: campaign sends split evenly across its sending accounts.
         </div>
       </div>
 

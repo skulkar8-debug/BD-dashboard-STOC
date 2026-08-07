@@ -192,6 +192,7 @@ export type NormalizedEmail = {
   from_email: string;
   from_name: string;
   to_emails: string[];
+  eaccount: string; // our sending account that received this reply
   lead_id: string;
   thread_id: string;
   is_auto_reply: boolean;
