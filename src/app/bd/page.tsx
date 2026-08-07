@@ -808,11 +808,19 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
 
     // Alias domains (trymclerran…, mymclerran…) are the same brand — cluster them.
     // Brand key = registrable core with common marketing prefixes stripped.
-    const PREFIXES = ['try', 'my', 'get', 'go', 'meet', 'hello', 'use', 'with', 'join', 'team', 'the', 'talk', 'ask', 'contact'];
+    // Strip iteratively so stacked prefixes collapse too (hellogoaegvision → aegvision)
+    const PREFIXES = ['try', 'my', 'get', 'go', 'meet', 'hello', 'use', 'with', 'join', 'team', 'the', 'talk', 'ask', 'contact', 'best', 'pro', 'smart'];
     const brandOf = (domain: string): string => {
-      const core = domain.split('.')[0]?.toLowerCase() ?? domain;
-      for (const p of PREFIXES) {
-        if (core.startsWith(p) && core.length - p.length >= 5) return core.slice(p.length);
+      let core = domain.split('.')[0]?.toLowerCase() ?? domain;
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const p of PREFIXES) {
+          if (core.startsWith(p) && core.length - p.length >= 5) {
+            core = core.slice(p.length);
+            changed = true;
+          }
+        }
       }
       return core;
     };
