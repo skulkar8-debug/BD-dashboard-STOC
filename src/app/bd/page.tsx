@@ -790,10 +790,17 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
     domain: string; org: string; total: number; healthy: number;
     avgScore: number; issues: string[];
   };
+  // Accounts are org-level — apply the org filter (sector/state don't map to mailboxes)
+  const filteredAccounts = useMemo(() => {
+    if (!accounts) return null;
+    if (filters.orgs.length === 0) return accounts;
+    return accounts.filter((o) => filters.orgs.includes(o.org_id));
+  }, [accounts, filters.orgs]);
+
   const domainHealth = useMemo<DomainHealth[]>(() => {
-    if (!accounts) return [];
+    if (!filteredAccounts) return [];
     const byDomain = new Map<string, { org: string; scores: number[]; statuses: number[]; warmups: number[] }>();
-    accounts.forEach((o) => {
+    filteredAccounts.forEach((o) => {
       o.accounts.forEach((a) => {
         const domain = a.email.split('@')[1] ?? 'unknown';
         const cur = byDomain.get(domain) ?? { org: o.org_label, scores: [], statuses: [], warmups: [] };
@@ -818,7 +825,7 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
       if (lowScore > 0) issues.push(`${lowScore} low warmup score`);
       return { domain, org: v.org, total, healthy, avgScore, issues };
     }).sort((a, b) => (a.issues.length - b.issues.length) || b.avgScore - a.avgScore);
-  }, [accounts]);
+  }, [filteredAccounts]);
 
   const healthyDomains = domainHealth.filter((d) => d.issues.length === 0);
   const problemDomains = domainHealth.filter((d) => d.issues.length > 0);
@@ -846,7 +853,7 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
 
   // ── What are we missing (auto-detected) ──
   const unmappedCampaigns = campaigns.filter((c) => c.sector === 'Unmapped' || !c.sector).length;
-  const orgErrors = accounts?.filter((o) => o.error).map((o) => o.org_label) ?? [];
+  const orgErrors = filteredAccounts?.filter((o) => o.error).map((o) => o.org_label) ?? [];
 
   // ── Focus recommendations ──
   const focus = useMemo(() => {
