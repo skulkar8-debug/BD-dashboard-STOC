@@ -887,9 +887,10 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
       // Outcome-based symptoms FIRST — only when we actually have outcome data,
       // so we never claim "zero replies" just because attribution data is missing
       if (anyOutcomeData) {
+        // Use unrounded ratios — 0.28% must not round up past a 0.3% threshold
         if (sent >= 200 && replies === 0) issues.push(`${sent.toLocaleString()} sent, ZERO replies — possible spam placement`);
-        else if (sent >= 500 && replyRate < 0.3) issues.push(`reply rate ${replyRate}% on ${sent.toLocaleString()} sent — very low`);
-        if (sent >= 100 && bounceRate > 3) issues.push(`${bounceRate}% bounce`);
+        else if (sent >= 500 && replies / sent < 0.005) issues.push(`reply rate ${replyRate}% on ${sent.toLocaleString()} sent — very low`);
+        if (sent >= 100 && bounces / sent > 0.03) issues.push(`${bounceRate}% bounce`);
       }
       // Infra signals from Instantly account status
       const errorCount = v.statuses.filter((s) => s < 0).length;
