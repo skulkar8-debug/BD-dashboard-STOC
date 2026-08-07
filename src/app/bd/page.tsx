@@ -806,24 +806,10 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
   const domainHealth = useMemo<DomainHealth[]>(() => {
     if (!filteredAccounts) return [];
 
-    // Alias domains (trymclerran…, mymclerran…) are the same brand — cluster them.
-    // Brand key = registrable core with common marketing prefixes stripped.
-    // Strip iteratively so stacked prefixes collapse too (hellogoaegvision → aegvision)
-    const PREFIXES = ['try', 'my', 'get', 'go', 'meet', 'hello', 'use', 'with', 'join', 'team', 'the', 'talk', 'ask', 'contact', 'best', 'pro', 'smart'];
-    const brandOf = (domain: string): string => {
-      let core = domain.split('.')[0]?.toLowerCase() ?? domain;
-      let changed = true;
-      while (changed) {
-        changed = false;
-        for (const p of PREFIXES) {
-          if (core.startsWith(p) && core.length - p.length >= 5) {
-            core = core.slice(p.length);
-            changed = true;
-          }
-        }
-      }
-      return core;
-    };
+    // Every domain is its own row — no alias clustering. Replies and bounces are
+    // attributed EXACTLY via eaccount (the mailbox each message landed in), so
+    // per-domain results are real, not split estimates. Only sent is estimated.
+    const brandOf = (domain: string): string => domain.toLowerCase();
 
     // 1. Warmup/status signals per brand from accounts (org + brand is the grouping key)
     const byBrand = new Map<string, { org: string; domains: Set<string>; scores: number[]; statuses: number[]; warmups: number[] }>();
@@ -842,17 +828,18 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
       });
     });
 
-    // 2. Attribute last week's outcomes + sectors to brands via campaign sending accounts.
-    // Splitting across brands (not raw domains) means alias domains don't dilute each other.
+    // 2. Outcomes per domain. Sent is estimated (campaign sends split across its
+    // sending domains). Replies and bounce notifications are EXACT — each one landed
+    // in a specific mailbox (eaccount), so we credit its domain directly.
     const outcomes = new Map<string, { sent: number; replies: number; bounces: number; sectors: Set<string> }>();
-    const repliesByCampaign = new Map<string, number>();
-    lastWkEmails.forEach((e) => {
-      repliesByCampaign.set(e.campaign_id, (repliesByCampaign.get(e.campaign_id) ?? 0) + 1);
-    });
+    const outFor = (key: string) => {
+      let o = outcomes.get(key);
+      if (!o) { o = { sent: 0, replies: 0, bounces: 0, sectors: new Set<string>() }; outcomes.set(key, o); }
+      return o;
+    };
     campaigns.forEach((c) => {
       const cur = lastWk?.[c.campaign_id];
-      const replies = repliesByCampaign.get(c.campaign_id) ?? 0;
-      if (!cur && replies === 0) return;
+      if (!cur || cur.sent === 0) return;
       const brandKeys = [...new Set(
         c.sending_accounts
           .map((a) => a.split('@')[1])
@@ -862,16 +849,27 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
       if (brandKeys.length === 0) return;
       const share = 1 / brandKeys.length;
       brandKeys.forEach((k) => {
-        const o = outcomes.get(k) ?? { sent: 0, replies: 0, bounces: 0, sectors: new Set<string>() };
-        o.sent += (cur?.sent ?? 0) * share;
-        o.bounces += (cur?.bounces ?? 0) * share;
-        o.replies += replies * share;
+        const o = outFor(k);
+        o.sent += cur.sent * share;
         if (c.sector && c.sector !== 'Unmapped') o.sectors.add(c.sector);
-        outcomes.set(k, o);
       });
+    });
+    // Exact per-domain replies and bounces via eaccount
+    lastWkEmails.forEach((e) => {
+      if (!e.eaccount) return;
+      const d = e.eaccount.split('@')[1];
+      if (!d) return;
+      const key = domainToBrandKey.get(d) ?? `${e.org_label}|||${brandOf(d)}`;
+      const o = outFor(key);
+      if (e.final_classification === 'bounce') o.bounces++;
+      else o.replies++;
+      if (e.sector && e.sector !== 'Unmapped') o.sectors.add(e.sector);
     });
 
     const anyOutcomeData = [...outcomes.values()].some((o) => o.sent > 0);
+    // Reply/bounce flags need eaccount on the email pull — never claim "zero replies"
+    // when the attribution field simply isn't there yet
+    const eaccountAvailable = lastWkEmails.some((e) => e.eaccount);
 
     return [...byBrand.entries()].map(([key, v]) => {
       const total = v.statuses.length;
@@ -886,11 +884,11 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
       const issues: string[] = [];
       // Outcome-based symptoms FIRST — only when we actually have outcome data,
       // so we never claim "zero replies" just because attribution data is missing
-      if (anyOutcomeData) {
+      if (anyOutcomeData && eaccountAvailable) {
         // Use unrounded ratios — 0.28% must not round up past a 0.3% threshold
-        if (sent >= 200 && replies === 0) issues.push(`${sent.toLocaleString()} sent, ZERO replies — possible spam placement`);
-        else if (sent >= 500 && replies / sent < 0.005) issues.push(`reply rate ${replyRate}% on ${sent.toLocaleString()} sent — very low`);
-        if (sent >= 100 && bounces / sent > 0.03) issues.push(`${bounceRate}% bounce`);
+        if (sent >= 200 && replies === 0) issues.push(`~${sent.toLocaleString()} sent, ZERO replies — possible spam placement`);
+        else if (sent >= 500 && replies / sent < 0.005) issues.push(`reply rate ${replyRate}% on ~${sent.toLocaleString()} sent — very low`);
+        if (sent >= 100 && bounces / sent > 0.03) issues.push(`${bounces} bounce notification${bounces > 1 ? 's' : ''} (${bounceRate}%)`);
       }
       // Infra signals from Instantly account status
       const errorCount = v.statuses.filter((s) => s < 0).length;
@@ -922,7 +920,7 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
   // ── Per-account performance — which sending emails ARE and AREN'T working ──
   type AccountPerf = {
     account: string; org: string; domain: string; sectors: string[];
-    estSent: number; replies: number; positive: number;
+    estSent: number; replies: number; positive: number; bounces: number;
     score: number; statusIssue: string;
   };
   const accountPerf = useMemo<AccountPerf[]>(() => {
@@ -933,7 +931,7 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
       if (!e) {
         e = {
           account, org, domain: account.split('@')[1] ?? '', sectorSet: new Set<string>(),
-          sectors: [], estSent: 0, replies: 0, positive: 0, score: 0, statusIssue: '',
+          sectors: [], estSent: 0, replies: 0, positive: 0, bounces: 0, score: 0, statusIssue: '',
         };
         m.set(account, e);
       }
@@ -963,12 +961,16 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
       });
     });
 
-    // Exact reply attribution via eaccount on each reply
+    // Exact attribution via eaccount: bounce notifications count as bounces,
+    // everything else as replies
     lastWkEmails.forEach((em) => {
       if (!em.eaccount) return;
       const e = entryFor(em.eaccount, em.org_label);
-      e.replies++;
-      if (em.is_positive) e.positive++;
+      if (em.final_classification === 'bounce') e.bounces++;
+      else {
+        e.replies++;
+        if (em.is_positive) e.positive++;
+      }
       if (em.sector && em.sector !== 'Unmapped') e.sectorSet.add(em.sector);
     });
 
@@ -988,6 +990,13 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
     () => [...accountPerf]
       .filter((a) => a.estSent >= 50 && a.replies === 0)
       .sort((a, b) => b.estSent - a.estSent)
+      .slice(0, 12),
+    [accountPerf]
+  );
+  const bouncyAccounts = useMemo(
+    () => [...accountPerf]
+      .filter((a) => a.bounces > 0)
+      .sort((a, b) => b.bounces - a.bounces || b.estSent - a.estSent)
       .slice(0, 12),
     [accountPerf]
   );
@@ -1354,7 +1363,7 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
             Reply-to-account attribution needs a data refresh — hit Refresh (top right) to repull emails with sending-account info.
           </div>
         ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="bg-white border border-emerald-200 rounded-xl shadow-sm overflow-hidden">
             <div className="px-4 py-2.5 border-b border-emerald-100 bg-emerald-50 text-xs font-semibold text-emerald-700">Accounts Producing Replies ({topAccounts.length})</div>
             {topAccounts.length === 0 ? <div className="px-4 py-3 text-xs text-gray-400">No replies attributed to accounts last week.</div> : (
@@ -1369,7 +1378,11 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
                     </div>
                     <div className="text-right flex-shrink-0">
                       <div className="text-xs"><span className="font-bold text-emerald-600">{a.positive} pos</span> <span className="text-gray-400">/ {a.replies} repl</span></div>
-                      {a.statusIssue && <div className="text-[10px] text-red-500">{a.statusIssue}</div>}
+                      <div className="text-[10px]">
+                        {a.bounces > 0 && <span className="text-red-500">{a.bounces} bounce{a.bounces > 1 ? 's' : ''}</span>}
+                        {a.bounces > 0 && a.statusIssue && ' · '}
+                        {a.statusIssue && <span className="text-red-500">{a.statusIssue}</span>}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -1392,8 +1405,32 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
                       </div>
                     </div>
                     <div className="text-right flex-shrink-0">
-                      <div className="text-xs font-bold text-red-600">~{fmt(a.estSent)} sent · 0 repl</div>
+                      <div className="text-xs font-bold text-red-600">~{fmt(a.estSent)} sent · 0 repl{a.bounces > 0 && ` · ${a.bounces} bnc`}</div>
                       {a.statusIssue && <div className="text-[10px] text-red-500">{a.statusIssue}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className={`border rounded-xl shadow-sm overflow-hidden ${bouncyAccounts.length > 0 ? 'border-orange-200' : 'border-gray-200'}`}>
+            <div className={`px-4 py-2.5 border-b text-xs font-semibold ${bouncyAccounts.length > 0 ? 'bg-orange-50 border-orange-100 text-orange-700' : 'bg-gray-50 border-gray-100 text-gray-400'}`}>
+              Accounts Collecting Bounces ({bouncyAccounts.length})
+            </div>
+            {bouncyAccounts.length === 0 ? <div className="px-4 py-3 bg-white text-xs text-gray-400">No bounce notifications received last week.</div> : (
+              <div className="divide-y divide-gray-50 bg-white max-h-72 overflow-y-auto">
+                {bouncyAccounts.map((a) => (
+                  <div key={a.account} className="px-3 py-2 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-xs font-medium text-gray-800 truncate">{a.account}</div>
+                      <div className="text-[10px] text-gray-400 truncate">
+                        {a.org}{a.sectors.length > 0 && <> · {a.sectors.join(', ')}</>}{a.estSent > 0 && <> · ~{fmt(a.estSent)} sent</>}
+                      </div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <div className="text-xs font-bold text-orange-600">{a.bounces} bounce{a.bounces > 1 ? 's' : ''}</div>
+                      <div className="text-[10px] text-gray-400">{a.replies} repl{a.statusIssue && <span className="text-red-500"> · {a.statusIssue}</span>}</div>
                     </div>
                   </div>
                 ))}
@@ -1403,7 +1440,7 @@ function WeeklyTab({ campaigns: allCampaigns, emails: allEmails, filters }: { ca
         </div>
         )}
         <div className="text-[10px] text-gray-400 mt-1.5 px-0.5">
-          Replies are attributed exactly (each reply lands in a specific sending account). Sent per account is estimated: campaign sends split evenly across its sending accounts.
+          Replies and bounce notifications are attributed exactly (each lands in a specific sending mailbox). Sent per account is estimated: campaign sends split evenly across its sending accounts.
         </div>
       </div>
 
